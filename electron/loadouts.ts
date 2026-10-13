@@ -7,10 +7,11 @@ import { GAME_EXE, backup, backupRoot, isRunning } from './loadOrderWrite';
 import { findMo2Instances, readMo2Modlist } from './mo2';
 import { planRimworldOrder } from './rimworldSort';
 import { isPluginGame, pluginLoadOrder, setPluginModsEnabled } from './bethesdaPlugins';
+import { dataDir } from './dataDir';
 
 /**
  * Loadouts = named mod lists per game, kept where the game itself keeps them when it has its own format
- * (RimWorld ModLists/*.rml, PZ Lua/saved_modlists.txt), plus PZ per-save lists, plus Mod Hub's own lists for
+ * (RimWorld ModLists/*.rml, PZ Lua/saved_modlists.txt), plus PZ per-save lists, plus ModKeeper's own lists for
  * games without one (Isaac). Applying a loadout replaces the game's enabled list (backed up; game must be closed).
  */
 
@@ -91,7 +92,7 @@ function pzSavesDir(): string {
 }
 
 function modHubListsDir(gameId: string): string {
-  return path.join(process.env.APPDATA ?? os.homedir(), 'mod-hub', 'loadouts', gameId);
+  return path.join(dataDir(), 'loadouts', gameId);
 }
 
 type RawLoadout = Omit<Loadout, 'count' | 'missing' | 'toEnable' | 'toDisable' | 'isCurrent'>;
@@ -187,7 +188,7 @@ function readModHubLists(gameId: string): RawLoadout[] {
         gameId,
         name: j.name,
         kind: 'modhub',
-        kindLabel: 'Mod Hub list',
+        kindLabel: 'ModKeeper list',
         path: path.join(dir, f),
         ids: j.ids,
         modifiedAt: j.savedAt ?? mtimeIso(path.join(dir, f)),
@@ -435,7 +436,7 @@ export function applyLoadout(gameId: string, loadoutId: string, mods: ModRecord[
       }
     }
     const note = l.missing.length ? ` ${l.missing.length} mod(s) in it aren't installed and were skipped by the game.` : '';
-    console.log(`[Mod Hub] Applied loadout "${l.name}" to ${gameId}`);
+    console.log(`[ModKeeper] Applied loadout "${l.name}" to ${gameId}`);
     return { ok: true, message: `Applied “${l.name}” (+${l.toEnable} / −${l.toDisable}).${note}${sortedNote}` };
   } catch (e) {
     return { ok: false, message: `Couldn't apply: ${e instanceof Error ? e.message : String(e)}` };
@@ -508,7 +509,7 @@ ${li(ids.map(nameFor))}
   }
 }
 
-/** Remove a saved list. Files go to Mod Hub's backups folder, never straight to deletion. */
+/** Remove a saved list. Files go to ModKeeper's backups folder, never straight to deletion. */
 export function deleteLoadout(gameId: string, loadoutId: string, mods: ModRecord[]): Result {
   const l = getLoadouts(gameId, mods).loadouts.find((x) => x.id === loadoutId);
   if (!l || !l.canDelete || !l.path) return { ok: false, message: 'This loadout cannot be removed here.' };
@@ -523,7 +524,7 @@ export function deleteLoadout(gameId: string, loadoutId: string, mods: ModRecord
       fs.mkdirSync(dest, { recursive: true });
       fs.renameSync(l.path, path.join(dest, `${Date.now()}-${path.basename(l.path)}`));
     }
-    return { ok: true, message: `Removed “${l.name}” (a copy is in Mod Hub's backups).` };
+    return { ok: true, message: `Removed “${l.name}” (a copy is in ModKeeper's backups).` };
   } catch (e) {
     return { ok: false, message: `Couldn't remove: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -542,7 +543,7 @@ export function updateLoadout(gameId: string, loadoutId: string, mods: ModRecord
       const dest = path.join(backupRoot(), gameId, 'removed-loadouts');
       fs.mkdirSync(dest, { recursive: true });
       fs.renameSync(l.path, path.join(dest, `${Date.now()}-${path.basename(l.path)}`));
-      return { ok: true, message: `${r.message} (Converted from the older .xml list; the original is in Mod Hub's backups.)` };
+      return { ok: true, message: `${r.message} (Converted from the older .xml list; the original is in ModKeeper's backups.)` };
     }
     return r;
   }
@@ -591,7 +592,7 @@ export function exportLoadoutCode(gameId: string, loadoutId: string, mods: ModRe
 /** Save a pasted share code as a new list for its game (in the game's own format). */
 export function importLoadoutCode(code: string, mods: ModRecord[]): Result & { gameId?: string } {
   const raw = code.trim();
-  if (!raw.startsWith(CODE_PREFIX)) return { ok: false, message: 'That doesn\u2019t look like a Mod Hub share code.' };
+  if (!raw.startsWith(CODE_PREFIX)) return { ok: false, message: 'That doesn\u2019t look like a ModKeeper share code.' };
   let data: { g?: string; n?: string; i?: unknown };
   try {
     data = JSON.parse(Buffer.from(raw.slice(CODE_PREFIX.length), 'base64').toString('utf8'));

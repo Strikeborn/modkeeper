@@ -193,7 +193,7 @@ export const ModCard = memo(function ModCard({
           {security?.lua && (
             <span
               className="status-pill sec-pill sec-flagged"
-              title={`This mod's scripts use: ${security.lua.join(', ')}. Isaac blocks these unless LuaDebug is on, which removes the sandbox for every mod. Mod Hub keeps LuaDebug off.`}
+              title={`This mod's scripts use: ${security.lua.join(', ')}. Isaac blocks these unless LuaDebug is on, which removes the sandbox for every mod. ModKeeper keeps LuaDebug off.`}
             >
               ⚠ Wants LuaDebug ({security.lua[0].split(' (')[0]}
               {security.lua.length > 1 ? ` +${security.lua.length - 1}` : ''})
@@ -301,7 +301,7 @@ export const ModCard = memo(function ModCard({
           )}
           {mod.tags?.includes('vault') && (
             <span className="status-pill" title={mod.localPath}>
-              Saved by Mod Hub vault — Vortex removed its copy
+              Saved by ModKeeper's archive vault — Vortex removed its copy
             </span>
           )}
           {mod.localMissing && (

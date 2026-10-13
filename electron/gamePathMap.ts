@@ -1,6 +1,6 @@
 import { gameById } from './gamesRegistry';
 
-/** Steam `steamapps/common` folder name → Mod Hub game id */
+/** Steam `steamapps/common` folder name → ModKeeper game id */
 export const COMMON_FOLDER_TO_GAME_ID: Record<string, string> = {
   'Cyberpunk 2077': 'cyberpunk2077',
   RimWorld: 'rimworld',

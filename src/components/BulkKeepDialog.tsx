@@ -71,7 +71,7 @@ export function BulkKeepDialog({ mods, games, onClose }: Props) {
                     <td>{g.name}</td>
                     <td>{g.count}</td>
                     <td>{formatBytes(g.bytes)}</td>
-                    <td className="bulk-dest">{DEST[id] ?? "Mod Hub's kept-mods folder — backup only, the game won't load it"}</td>
+                    <td className="bulk-dest">{DEST[id] ?? "ModKeeper's kept-mods folder — backup only, the game won't load it"}</td>
                   </tr>
                 ))}
               </tbody>

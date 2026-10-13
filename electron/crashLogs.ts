@@ -5,7 +5,7 @@ import type { CrashReport, ModRecord } from '../shared/types';
 import { modPlugins, modSkseDlls } from './bethesdaPlugins';
 
 /**
- * Crash Logger SSE AE VR writes Documents\My Games\<game>\SKSE\crash-<date>.log. Mod Hub reads the newest one
+ * Crash Logger SSE AE VR writes Documents\My Games\<game>\SKSE\crash-<date>.log. ModKeeper reads the newest one
  * and names the likely culprits: DLLs in the probable call stack (other than the game and Windows) and plugin
  * files the crashed objects came from, mapped back to library mods.
  */

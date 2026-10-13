@@ -19,7 +19,7 @@ export function EmbeddedWebView({ src, title, partition = 'persist:modhub-webvie
   }
   return (
     <div className="empty-state">
-      <p>Embedded browse works in the Mod Hub desktop app.</p>
+      <p>Embedded browse works in the ModKeeper desktop app.</p>
       <p>
         <a href={src} target="_blank" rel="noreferrer">
           Open in browser: {title}

@@ -282,13 +282,13 @@ export function buildDownloadArchiveIndex(
 
     if (USE_7Z_FOR.test(filePath) && !find7zExecutable() && !warnedNo7z) {
       warnedNo7z = true;
-      console.warn('[Mod Hub] 7-Zip not found — install 7-Zip for .7z mod archive linking.');
+      console.warn('[ModKeeper] 7-Zip not found — install 7-Zip for .7z mod archive linking.');
     }
     let innerNames: string[] = [];
     try {
       innerNames = findInnerArchiveNames(filePath);
     } catch (err) {
-      console.warn(`[Mod Hub] Skipping archive index for ${filePath}:`, err);
+      console.warn(`[ModKeeper] Skipping archive index for ${filePath}:`, err);
     }
     for (const inner of innerNames) {
       const key = normalizeArchiveDeployKey(inner);
@@ -299,7 +299,7 @@ export function buildDownloadArchiveIndex(
   try {
     indexVortexStagingArchives(byDeployKey, byNexusId, downloadsRoot);
   } catch (err) {
-    console.warn("[Mod Hub] Staging archive index failed:", err);
+    console.warn("[ModKeeper] Staging archive index failed:", err);
   }
 
   onProgress?.(work.length, work.length);

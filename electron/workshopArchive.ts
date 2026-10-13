@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ModRecord } from '../shared/types';
+import { dataDir } from './dataDir';
 
 /**
  * Last known Workshop details per item (%APPDATA%/mod-hub/workshop-archive.json). Every scan remembers what
@@ -28,7 +29,7 @@ export type WorkshopArchiveEntry = {
 type Archive = Record<string, WorkshopArchiveEntry>;
 
 function archivePath(): string {
-  return path.join(process.env.APPDATA ?? '', 'mod-hub', 'workshop-archive.json');
+  return path.join(dataDir(), 'workshop-archive.json');
 }
 
 export function loadWorkshopArchive(): Archive {

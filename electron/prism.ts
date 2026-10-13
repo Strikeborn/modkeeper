@@ -5,12 +5,13 @@ import zlib from 'node:zlib';
 import type { EnableResult } from './loadOrderWrite';
 import type { GameLoadOrder, ModRecord } from '../shared/types';
 import { stableIdFromParts } from './scanHelpers';
+import { entryData, zipEntries } from './zipUtil';
 
 /**
  * Prism Launcher (Minecraft): instances in %APPDATA%\PrismLauncher\instances (or the configured InstanceDir).
  * Each instance: instance.cfg (name), mmc-pack.json (Minecraft version + mod loader), minecraft\mods\*.jar
  * (disabled = *.jar.disabled), and mods\.index\*.pw.toml written by Prism's mod downloader (Modrinth/CurseForge
- * ids). Mod Hub lists those mods, switches them on/off the way Prism does (renaming), launches an instance,
+ * ids). ModKeeper lists those mods, switches them on/off the way Prism does (renaming), launches an instance,
  * and checks Modrinth for updates by file hash (no account needed).
  */
 
@@ -109,7 +110,23 @@ export function readZipEntry(file: string, wanted: (name: string) => boolean): {
   return null;
 }
 
-type JarMeta = { modId?: string; name?: string; version?: string; authors?: string; description?: string };
+export type JarMeta = {
+  modId?: string;
+  name?: string;
+  version?: string;
+  authors?: string;
+  description?: string;
+  /** Mod ids this one needs (game, loader and Java left out). */
+  depends?: string[];
+  /** Other ids this jar answers to (e.g. fabric-api provides "fabric"). */
+  provides?: string[];
+  /** Path of its icon inside the jar. */
+  icon?: string;
+};
+
+/** Ids that are the game or the loader itself, never a mod you'd install. */
+// mixinextras ships inside Fabric Loader (0.15+) and NeoForge, so mods that list it never need it installed
+const BUILTIN_IDS = new Set(['minecraft', 'java', 'fabricloader', 'fabric-loader', 'quilt_loader', 'forge', 'neoforge', 'javafml', 'lowcodefml', 'mcp', 'mixinextras']);
 
 const tomlValue = (text: string, key: string) => new RegExp(`^\\s*${key}\\s*=\\s*(?:"""([\\s\\S]*?)"""|"([^"]*)"|'([^']*)')`, 'm').exec(text)?.slice(1).find((x) => x != null);
 
@@ -131,12 +148,29 @@ export function jarMetadata(file: string): JarMeta {
         : typeof authorsRaw === 'object' && authorsRaw
           ? Object.keys(authorsRaw).join(', ')
           : undefined;
+      const dependsRaw = (j.depends ?? q.depends ?? {}) as unknown;
+      const depends = (
+        Array.isArray(dependsRaw)
+          ? dependsRaw.map((d) => (typeof d === 'string' ? d : (d as { id?: string }).id ?? ''))
+          : Object.keys(dependsRaw as Record<string, unknown>)
+      ).filter((d) => d && !BUILTIN_IDS.has(d));
+      const providesRaw = [...((j.provides ?? q.provides ?? []) as unknown[]), ...nestedJarIds(file, j.jars ?? q.jars)];
+      const iconRaw = (j.icon ?? meta.icon) as unknown;
+      const icon =
+        typeof iconRaw === 'string'
+          ? iconRaw
+          : iconRaw && typeof iconRaw === 'object'
+            ? (Object.entries(iconRaw as Record<string, string>).sort((a, b) => Number(b[0]) - Number(a[0]))[0]?.[1] ?? undefined)
+            : undefined;
       return {
         modId: (j.id ?? q.id) as string | undefined,
         name: (j.name ?? meta.name) as string | undefined,
         version: (j.version ?? q.version) as string | undefined,
         authors: authors || undefined,
         description: (j.description ?? meta.description) as string | undefined,
+        depends: depends.length ? depends : undefined,
+        provides: Array.isArray(providesRaw) ? providesRaw.map((x) => (typeof x === 'string' ? x : (x as { id?: string }).id ?? '')).filter(Boolean) : undefined,
+        icon,
       };
     }
     const mods = text.split(/^\s*\[\[mods\]\]\s*$/m)[1] ?? text;
@@ -144,10 +178,52 @@ export function jarMetadata(file: string): JarMeta {
     if (version === '${file.jarVersion}') {
       version = /^Implementation-Version:\s*(.+)$/m.exec(readZipEntry(file, (n) => n === 'META-INF/MANIFEST.MF')?.data.toString('utf8') ?? '')?.[1]?.trim();
     }
-    return { modId: tomlValue(mods, 'modId'), name: tomlValue(mods, 'displayName'), version, authors: tomlValue(mods, 'authors') ?? tomlValue(text, 'authors'), description: tomlValue(mods, 'description')?.trim() };
+    // [[dependencies.<id>]] blocks: mandatory=true (Forge) or type="required" (NeoForge)
+    const depends: string[] = [];
+    for (const block of text.split(/^\s*\[\[dependencies\.[^\]]+\]\]\s*$/m).slice(1)) {
+      const body = block.split(/^\s*\[/m)[0];
+      const id = tomlValue(body, 'modId');
+      const required = /^\s*mandatory\s*=\s*true/m.test(body) || /^\s*type\s*=\s*"required"/m.test(body);
+      if (id && required && !BUILTIN_IDS.has(id) && !depends.includes(id)) depends.push(id);
+    }
+    return {
+      modId: tomlValue(mods, 'modId'),
+      name: tomlValue(mods, 'displayName'),
+      version,
+      authors: tomlValue(mods, 'authors') ?? tomlValue(text, 'authors'),
+      description: tomlValue(mods, 'description')?.trim(),
+      depends: depends.length ? depends : undefined,
+      icon: tomlValue(mods, 'logoFile') ?? tomlValue(text, 'logoFile'),
+    };
   } catch {
     return {};
   }
+}
+
+/** Ids of the jars bundled inside a Fabric/Quilt jar (Fabric API ships its modules this way). */
+function nestedJarIds(file: string, jars: unknown): string[] {
+  if (!Array.isArray(jars) || jars.length === 0) return [];
+  const out: string[] = [];
+  try {
+    const outer = fs.readFileSync(file);
+    const entries = zipEntries(outer);
+    for (const j of jars) {
+      const name = typeof j === 'string' ? j : (j as { file?: string }).file;
+      const e = name && entries.find((x) => x.name === name);
+      if (!e) continue;
+      const inner = entryData(outer, e);
+      const meta = zipEntries(inner).find((x) => x.name === 'fabric.mod.json' || x.name === 'quilt.mod.json');
+      if (!meta) continue;
+      // oxlint-disable-next-line no-control-regex
+      const m = JSON.parse(entryData(inner, meta).toString('utf8').replace(/[\u0000-\u001f]+/g, ' ')) as { id?: string; provides?: string[]; quilt_loader?: { id?: string } };
+      const id = m.id ?? m.quilt_loader?.id;
+      if (id) out.push(id);
+      out.push(...(m.provides ?? []).filter((x) => typeof x === 'string'));
+    }
+  } catch {
+    /* unreadable nested jar: leave it out */
+  }
+  return out;
 }
 
 type IndexEntry = { name?: string; filename?: string; modrinthId?: string; modrinthVersion?: string; curseforgeId?: string; sha1?: string };
@@ -305,7 +381,7 @@ export async function checkModrinthUpdates(mods: ModRecord[]): Promise<number> {
     const [loader, mc] = key.split('|');
     const res = await fetch('https://api.modrinth.com/v2/version_files/update', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Strikeborn/mod-hub (github.com/Strikeborn/mod-hub)' },
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'Strikeborn/ModKeeper (github.com/Strikeborn/modkeeper)' },
       body: JSON.stringify({ hashes: list.map((m) => m.prism!.sha1), algorithm: 'sha1', loaders: loader ? [loader] : [], game_versions: mc ? [mc] : [] }),
     });
     if (!res.ok) continue;

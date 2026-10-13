@@ -75,7 +75,7 @@ export function InjectedWebView({ src, title, partition = 'persist:modhub-nexus-
 
   return (
     <div className="empty-state">
-      <p>Injected browse requires the Mod Hub desktop app.</p>
+      <p>Injected browse requires the ModKeeper desktop app.</p>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { discoverSteamLibraries } from './steamDiscovery';
 
 /**
  * Isaac's Lua runs sandboxed: no files, no programs. "LuaDebug" (REPENTOGON launcher setting, or Steam's
- * `--luadebug` launch option) removes that sandbox for every enabled mod. Mod Hub keeps it off and flags mods
+ * `--luadebug` launch option) removes that sandbox for every enabled mod. ModKeeper keeps it off and flags mods
  * whose scripts try to use the blocked APIs (those are the ones that ask you to turn it on).
  */
 

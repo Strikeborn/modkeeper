@@ -100,7 +100,7 @@ async function modrinthChanges(mod: ModRecord): Promise<ModChanges> {
   if (p.loader) q.set('loaders', JSON.stringify([p.loader]));
   if (p.mcVersion) q.set('game_versions', JSON.stringify([p.mcVersion]));
   const res = await fetch(`https://api.modrinth.com/v2/project/${p.modrinthId}/version?${q}`, {
-    headers: { 'User-Agent': 'Strikeborn/mod-hub (github.com/Strikeborn/mod-hub)' },
+    headers: { 'User-Agent': 'Strikeborn/ModKeeper (github.com/Strikeborn/modkeeper)' },
   });
   if (!res.ok) throw new Error(`Modrinth HTTP ${res.status}`);
   const versions = (await res.json()) as { version_number: string; changelog?: string; date_published: string; files: { hashes: { sha1: string } }[] }[];

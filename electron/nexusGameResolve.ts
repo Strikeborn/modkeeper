@@ -98,7 +98,7 @@ export function fixMetadbNexusIds(mods: ModRecord[], state: VortexStateIndex): n
     const file = (m.localPath ?? '').split(/[\\/]/).pop() ?? '';
     const better = idCandidatesFromFileName(file).find((id) => id !== m.nexusModId && stateHasMod(state, domain, id));
     if (!better) continue;
-    console.log(`[Mod Hub] Nexus id fix: "${m.title}" ${domain} ${m.nexusModId} -> ${better}`);
+    console.log(`[ModKeeper] Nexus id fix: "${m.title}" ${domain} ${m.nexusModId} -> ${better}`);
     m.nexusModId = better;
     m.revision = { kind: 'nexus_file_id', value: String(better) };
     m.author = undefined;

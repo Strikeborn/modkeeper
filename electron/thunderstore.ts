@@ -66,7 +66,7 @@ const MANAGER_ROOTS = (): string[] => {
   return [path.join(appData, 'r2modmanPlus-local'), path.join(appData, 'Thunderstore Mod Manager', 'DataFolder')];
 };
 
-/** r2modman's game folder name ("LethalCompany", "RiskOfRain2") -> Mod Hub game id. */
+/** r2modman's game folder name ("LethalCompany", "RiskOfRain2") -> ModKeeper game id. */
 const GAME_IDS: Record<string, string> = {
   lethalcompany: 'lethal-company',
   riskofrain2: 'risk-of-rain-2',

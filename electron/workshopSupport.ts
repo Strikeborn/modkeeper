@@ -1,7 +1,7 @@
 /** Games with little or no public Steam Workshop browse (mods live on Nexus/other). */
 export const WORKSHOP_UNSUPPORTED: Record<number, string> = {
   413150:
-    'Stardew Valley does not use Steam Workshop for mods. Use Nexus Mods (SMPI) or the Nexus tab in Mod Hub.',
+    'Stardew Valley does not use Steam Workshop for mods. Use Nexus Mods (SMPI) or the Nexus tab in ModKeeper.',
   1086940:
     "Baldur's Gate 3 has no Steam Workshop. Mods are on Nexus and installed via Vortex or BG3 Mod Manager.",
   1091500:

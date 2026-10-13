@@ -104,7 +104,7 @@ export function migrateVortexToMo2(gameId: string, mods: ModRecord[], profile?: 
         `modid=${row?.nexusModId ?? 0}`,
         `version=${row?.version ?? ''}`,
         'repository=Nexus',
-        `comments=Copied from Vortex by Mod Hub (${new Date().toISOString().slice(0, 10)})`,
+        `comments=Copied from Vortex by ModKeeper (${new Date().toISOString().slice(0, 10)})`,
         '',
       ].join('\r\n');
       fs.writeFileSync(path.join(it.to, 'meta.ini'), meta, 'utf8');

@@ -35,7 +35,21 @@ export function sha256(file: string): Promise<string> {
   });
 }
 
-/** Defender custom scan of one file or folder. Exit code 0 = clean, 2 = threats found. */
+/**
+ * MpCmdRun's answer. Exit code 2 alone isn't proof of a threat: when Defender's antivirus isn't running (another antivirus
+ * is the main one and Defender is off) the scan fails with "[Failed] 0x80004005" and also exits with 2. A threat counts
+ * only when the output reports one.
+ */
+export function parseDefenderResult(code: number | null, output: string): SecurityDefender {
+  const out = output.trim();
+  const last = out.split(/\r?\n/).filter(Boolean).pop() ?? '';
+  if (/found no threats/i.test(out) || (code === 0 && !/\bfailed\b/i.test(out))) return { status: 'clean', detail: last };
+  if (/found [1-9]\d* threats?/i.test(out) || /^\s*Threat\s*:/im.test(out)) return { status: 'threat', detail: out.slice(-50_000) };
+  // Defender switched off, or the scan failed.
+  return { status: 'unavailable', detail: last || `MpCmdRun exited with ${code}` };
+}
+
+/** Defender custom scan of one file or folder (the result is read from its output, see parseDefenderResult). */
 export function defenderScan(target: string): Promise<SecurityDefender> {
   const exe = defenderExe();
   if (!exe) return Promise.resolve({ status: 'unavailable', detail: 'Microsoft Defender not found' });
@@ -51,11 +65,7 @@ export function defenderScan(target: string): Promise<SecurityDefender> {
     });
     p.on('close', (code) => {
       clearTimeout(timer);
-      const last = out.trim().split(/\r?\n/).filter(Boolean).pop() ?? '';
-      if (code === 0) resolve({ status: 'clean', detail: last });
-      else if (code === 2) resolve({ status: 'threat', detail: out.trim().slice(-50_000) });
-      // Defender switched off entirely, or the scan failed.
-      else resolve({ status: 'unavailable', detail: last || `MpCmdRun exited with ${code}` });
+      resolve(parseDefenderResult(code, out));
     });
   });
 }

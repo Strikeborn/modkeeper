@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { dataDir } from './dataDir';
 
 /**
- * Mod Hub archive vault: a hard link to every Vortex download archive.
+ * ModKeeper archive vault: a hard link to every Vortex download archive.
  * A hard link is a second name for the same file, so it costs no extra disk space. If Vortex
- * deletes or replaces its copy, the vault copy survives and Mod Hub points at it instead.
+ * deletes or replaces its copy, the vault copy survives and ModKeeper points at it instead.
  */
 export function vaultRoot(): string {
-  return path.join(process.env.APPDATA ?? '', 'mod-hub', 'vault');
+  return path.join(dataDir(), 'vault');
 }
 
 function vortexDownloadsRoot(): string {

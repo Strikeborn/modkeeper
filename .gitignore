@@ -31,7 +31,7 @@ tools/.trigger-*
 settings.json
 catalog.json
 
-# Mod Hub runtime data. It normally lives in %APPDATA%\mod-hub; never commit a copy that lands here.
+# ModKeeper runtime data. It normally lives in %APPDATA%\mod-hub; never commit a copy that lands here.
 workshop-archive.json
 download-archive-index.json
 steam-creator-names.json
@@ -57,7 +57,7 @@ NEXT_CHAT.md
 !.vscode/extensions.json
 .idea
 .cursor/
-.claude/settings.local.json
+.claude/
 *.suo
 *.ntvs*
 *.njsproj

@@ -9,7 +9,7 @@ import { steamGameDir } from './workshopActions';
 /**
  * Bethesda plugin load order (Skyrim SE): which .esp/.esm/.esl files are active, and in what order.
  * - Played through Mod Organizer 2: the chosen MO2 profile's plugins.txt / loadorder.txt / modlist.txt.
- *   Mod Hub edits those (MO2 must be closed; files backed up first).
+ *   ModKeeper edits those (MO2 must be closed; files backed up first).
  * - Played without MO2: %LOCALAPPDATA%\<game>\plugins.txt, which Vortex rewrites on deploy, so it's read-only.
  * Mods deployed by Vortex sit in the game's Data folder, so their SKSE DLLs load in every MO2 profile; only
  * their plugins can be switched off per profile.

@@ -1,6 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// "Is the game running?" checks call tasklist; tests must not depend on what's open on this PC.
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:child_process')>()),
+  execFileSync: () => '',
+}));
 import { planRimworldOrder } from '../electron/rimworldSort';
 import { readLoadOrders } from '../electron/loadOrder';
 import { setLoadOrder, setModsEnabled } from '../electron/loadOrderWrite';

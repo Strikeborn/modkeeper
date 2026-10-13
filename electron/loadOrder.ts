@@ -240,7 +240,7 @@ export function readLoadOrders(mods: ModRecord[]): Record<string, GameLoadOrder>
       const r = adapter(mods);
       if (r) out[r.gameId] = r;
     } catch (e) {
-      console.warn('[Mod Hub] load order read failed:', e);
+      console.warn('[ModKeeper] load order read failed:', e);
     }
   }
   return out;

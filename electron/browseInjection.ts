@@ -48,6 +48,6 @@ export function loadBrowseInjectionScript(): { script: string; source: string } 
     }
   }
   return {
-    error: `Browse injection runtime not found${problems.length ? ` (${problems.join('; ')})` : ''}. Expected vortex-builtin-mod-browser-enhanced/src/injectionRuntime.js next to Mod Hub, or set MOD_HUB_INJECTION_SCRIPT to that file.`,
+    error: `Browse injection runtime not found${problems.length ? ` (${problems.join('; ')})` : ''}. Expected vortex-builtin-mod-browser-enhanced/src/injectionRuntime.js next to ModKeeper, or set MOD_HUB_INJECTION_SCRIPT to that file.`,
   };
 }

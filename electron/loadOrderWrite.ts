@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { ModRecord } from '../shared/types';
 import { isaacFolderForMod, isaacModsDir, pzDefaultModsFile, rimworldModsConfigFile } from './loadOrder';
+import { dataDir } from './dataDir';
 
 /**
  * Enable/disable mods in the game's OWN mod list. Rules: never while the game runs (it rewrites these files on
@@ -18,7 +18,7 @@ export const GAME_EXE: Record<string, { exe: string; name: string }> = {
   'project-zomboid': { exe: 'ProjectZomboid64.exe', name: 'Project Zomboid' },
 };
 
-/** Running-process names for games Mod Hub can launch but doesn't write mod lists for. */
+/** Running-process names for games ModKeeper can launch but doesn't write mod lists for. */
 export const PLAY_EXE: Record<string, string[]> = {
   'binding-of-isaac': ['isaac-ng.exe'],
   rimworld: ['RimWorldWin64.exe'],
@@ -40,7 +40,7 @@ export function isRunning(exe: string): boolean {
 }
 
 export function backupRoot(): string {
-  return path.join(process.env.APPDATA ?? os.homedir(), 'mod-hub', 'backups');
+  return path.join(dataDir(), 'backups');
 }
 
 /** Copy `file` to backups/<gameId>/<name>-<timestamp><ext> and keep the newest 30. */
@@ -157,7 +157,7 @@ function listSet(gameId: string, list: ListFile | null, mods: ModRecord[], enabl
   if (ids.join('\n') !== before) {
     const saved = backup(gameId, list.file);
     fs.writeFileSync(list.file, list.write(text, ids), 'utf8');
-    console.log(`[Mod Hub] ${gameId}: ${enabled ? 'enabled' : 'disabled'} ${changed} mod(s); backup ${saved}`);
+    console.log(`[ModKeeper] ${gameId}: ${enabled ? 'enabled' : 'disabled'} ${changed} mod(s); backup ${saved}`);
   }
   const note = noId.length ? ` ${noId.length} skipped (no mod id): ${noId.slice(0, 3).join(', ')}` : '';
   const where = enabled && changed ? ' New ones were added at the end of the load order.' : '';
@@ -212,7 +212,7 @@ export function setLoadOrder(gameId: string, ids: string[]): EnableResult {
     if (moved === 0) return { ok: true, message: 'Order unchanged.', changed: 0 };
     const saved = backup(gameId, list.file);
     fs.writeFileSync(list.file, list.write(text, ids), 'utf8');
-    console.log(`[Mod Hub] ${gameId}: saved new load order (${moved} positions changed); backup ${saved}`);
+    console.log(`[ModKeeper] ${gameId}: saved new load order (${moved} positions changed); backup ${saved}`);
     return { ok: true, message: `Saved the new load order (${moved} position${moved === 1 ? '' : 's'} changed).`, changed: moved };
   } catch (e) {
     return { ok: false, message: `Couldn't save the order: ${e instanceof Error ? e.message : String(e)}`, changed: 0 };

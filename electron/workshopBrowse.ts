@@ -3,6 +3,7 @@ import { fetchWorkshopDetails, type WorkshopFetchProgress } from './workshopApi'
 import { workshopUnsupportedMessage } from './workshopSupport';
 import { formatCreatorDisplay, resolveSteamCreatorNames, steamProfileUrl } from './steamCreators';
 import { splitWorkshopTags } from './workshopTags';
+import { parseBrowsePageInfo, parseBrowseTags, parseBrowseTotals } from './workshopBrowsePage';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -11,8 +12,11 @@ function sortParam(sort: WorkshopBrowseQuery['sort']): string {
   switch (sort) {
     case 'recent':
       return 'mostrecent';
+    case 'updated':
+      return 'lastupdated';
     case 'subscribed':
-      return 'mostsubscribed';
+      // Steam dropped "mostsubscribed" (it quietly falls back to trending)
+      return 'totaluniquesubscribers';
     case 'rated':
       return 'toprated';
     default:
@@ -20,17 +24,35 @@ function sortParam(sort: WorkshopBrowseQuery['sort']): string {
   }
 }
 
-function buildBrowseUrl(q: WorkshopBrowseQuery): string {
+export function buildBrowseUrl(q: WorkshopBrowseQuery, now = Date.now()): string {
   const params = new URLSearchParams();
   params.set('appid', String(q.appId));
   params.set('browsesort', sortParam(q.sort));
   params.set('actualsort', sortParam(q.sort));
   params.set('section', 'readytouseitems');
+  const days = q.periodDays && q.periodDays > 0 ? Math.round(q.periodDays) : 0;
+  if (days) {
+    // made within the period, whatever the sort; trending also ranks over the same window
+    const end = Math.floor(now / 1000);
+    params.set('created_date_range_filter_start', String(end - days * 86400));
+    params.set('created_date_range_filter_end', String(end));
+    if (sortParam(q.sort) === 'trend') params.set('days', String(days));
+  }
   params.set('p', String(q.page ?? 1));
   params.set('numperpage', String(q.numPerPage ?? 30));
   if (q.searchText?.trim()) params.set('searchtext', q.searchText.trim());
   if (q.categoryTag?.trim()) params.set('requiredtags[]', q.categoryTag.trim());
   return `https://steamcommunity.com/workshop/browse/?${params.toString()}`;
+}
+
+/** Steam's full description as plain text: BBCode and links out, trimmed to what a card can show. */
+function cleanDescription(raw?: string): string | undefined {
+  const t = raw
+    ?.replace(/\[\/?[a-z0-9*]+(=[^\]]*)?\]/gi, ' ')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return t ? t.slice(0, 700) : undefined;
 }
 
 const JUNK_TITLE_RE = /modding policy|workshop guidelines|welcome to .* workshop|how to install|spiffo'?s workshop/i;
@@ -97,7 +119,14 @@ export async function queryWorkshopBrowse(
   }
 
   let ids = extractWorkshopIds(html, q.appId);
+  const pageInfo = parseBrowsePageInfo(html);
+  const totals = parseBrowseTotals(html);
+  const tags = parseBrowseTags(html);
 
+  if (ids.length === 0 && totals.total === 0) {
+    // the filters (period, tag, search) match nothing: an empty page, not a broken Workshop
+    return { items: [], page: q.page ?? 1, appId: q.appId, total: 0, totalPages: 0, tags, sourceUrl: url };
+  }
   if (ids.length === 0) {
     return {
       items: [],
@@ -148,8 +177,11 @@ export async function queryWorkshopBrowse(
     const votesUp = d?.votes_up ?? 0;
     const votesDown = d?.votes_down ?? 0;
     const totalVotes = votesUp + votesDown;
+    const info = pageInfo.get(id);
     const starScore =
-      d?.score != null && Number.isFinite(d.score)
+      info?.starRating != null && (info.totalVotes ?? 0) > 0
+        ? Math.max(0, Math.min(5, info.starRating))
+        : d?.score != null && Number.isFinite(d.score)
         ? Math.max(0, Math.min(5, d.score / 2))
         : totalVotes > 0
           ? Math.max(0, Math.min(5, (votesUp / totalVotes) * 5))
@@ -177,6 +209,10 @@ export async function queryWorkshopBrowse(
       votesUp,
       votesDown,
       starScore,
+      totalVotes: info?.totalVotes ?? (totalVotes || undefined),
+      description: cleanDescription(d?.description) ?? info?.description,
+      lifetimeSubscriptions: info?.subscriptions,
+      lifetimeFavorited: info?.favorited,
     });
   }
 
@@ -187,7 +223,51 @@ export async function queryWorkshopBrowse(
     page: q.page ?? 1,
     appId: q.appId,
     totalHint: gameModMax,
+    ...totals,
+    tags,
     sourceUrl: url,
     metadataMatched: items.filter((i) => !i.title.startsWith('Workshop ')).length,
   };
+}
+
+/** Cards for specific Workshop items (liked ones that aren't on disk), straight from Steam's details API. */
+export async function workshopItemsByIds(pairs: { appId: number; workshopId: string }[]): Promise<WorkshopBrowseItem[]> {
+  const ids = [...new Set(pairs.map((p) => p.workshopId).filter((id) => /^\d+$/.test(id)))];
+  if (ids.length === 0) return [];
+  const details = await fetchWorkshopDetails(ids);
+  const creatorIds = ids.map((id) => details.get(id)?.creator).filter((c): c is string => Boolean(c && /^\d{10,}$/.test(c.trim())));
+  const creatorNames = creatorIds.length ? await resolveSteamCreatorNames(creatorIds) : new Map<string, string>();
+  const out: WorkshopBrowseItem[] = [];
+  for (const p of pairs) {
+    const d = details.get(p.workshopId);
+    if (!d || (d.result != null && d.result !== 1)) continue;
+    const votesUp = d.votes_up ?? 0;
+    const votesDown = d.votes_down ?? 0;
+    const votes = votesUp + votesDown;
+    const rawCreator = d.creator?.trim();
+    const authorSteamId = rawCreator && /^\d{10,}$/.test(rawCreator) ? rawCreator : undefined;
+    const tagSplit = splitWorkshopTags(d.tags);
+    out.push({
+      workshopId: p.workshopId,
+      appId: d.consumer_app_id ?? p.appId,
+      title: d.title ?? `Workshop ${p.workshopId}`,
+      previewUrl: d.preview_url,
+      author: authorSteamId ? formatCreatorDisplay(authorSteamId, creatorNames) : rawCreator,
+      authorSteamId,
+      authorProfileUrl: authorSteamId ? steamProfileUrl(authorSteamId) : undefined,
+      timeCreated: d.time_created,
+      timeUpdated: d.time_updated,
+      fileSize: d.file_size,
+      gameVersionTags: tagSplit.gameVersions,
+      workshopCategories: tagSplit.categories,
+      votesUp,
+      votesDown,
+      starScore: votes > 0 ? Math.max(0, Math.min(5, (votesUp / votes) * 5)) : undefined,
+      totalVotes: votes || undefined,
+      description: cleanDescription(d.description),
+      lifetimeSubscriptions: d.lifetime_subscriptions,
+      lifetimeFavorited: d.lifetime_favorited,
+    });
+  }
+  return out;
 }

@@ -12,7 +12,7 @@ type Props = {
 const GAMES: { id: string; name: string; note: string }[] = [
   { id: 'rimworld', name: 'RimWorld', note: "Lists live in RimWorld's ModLists folder, the same ones its own Mod Lists menu uses." },
   { id: 'project-zomboid', name: 'Project Zomboid', note: "Saved lists come from PZ's mod manager; each save also keeps its own list." },
-  { id: 'binding-of-isaac', name: 'The Binding of Isaac', note: "Isaac has no list format of its own, so Mod Hub stores these. REPENTOGON's mod always stays on." },
+  { id: 'binding-of-isaac', name: 'The Binding of Isaac', note: "Isaac has no list format of its own, so ModKeeper stores these. REPENTOGON's mod always stays on." },
   {
     id: 'skyrimse',
     name: 'Skyrim SE (MO2)',
@@ -65,7 +65,7 @@ export function LoadoutsView({ catalog, onChanged }: Props) {
     void refresh();
   }, [refresh]);
 
-  // Lists can change in-game (RimWorld/PZ menus): re-read when Mod Hub regains focus.
+  // Lists can change in-game (RimWorld/PZ menus): re-read when ModKeeper regains focus.
   useEffect(() => {
     const onFocus = () => void refresh();
     window.addEventListener('focus', onFocus);
@@ -135,7 +135,7 @@ export function LoadoutsView({ catalog, onChanged }: Props) {
   }
 
   function remove(l: Loadout) {
-    if (!window.confirm(`Remove the saved list “${l.name}”?\n\nA copy goes to Mod Hub's backups folder.`)) return;
+    if (!window.confirm(`Remove the saved list “${l.name}”?\n\nA copy goes to ModKeeper's backups folder.`)) return;
     void run(() => window.modHub.deleteLoadout(gameId, l.id));
   }
 
@@ -236,7 +236,7 @@ The old version is backed up first.`,
       >
         <input
           type="text"
-          placeholder="Paste a Mod Hub share code (MODHUB1:…) to import a list"
+          placeholder="Paste a ModKeeper share code (MODHUB1:…) to import a list"
           value={importCode}
           onChange={(e) => setImportCode(e.target.value)}
         />

@@ -261,7 +261,7 @@ function ChangesSection({ mod }: { mod: ModRecord }) {
             </button>
           )}
           <p className="detail-muted">
-            Change notes are written by the mod author. Mod Hub can't diff the files themselves before you download.
+            Change notes are written by the mod author. ModKeeper can't diff the files themselves before you download.
           </p>
         </>
       )}
@@ -633,7 +633,24 @@ export function ModDetailPanel({ mod, games, allMods, onClose }: Props) {
             const r = workshopRating(mod);
             return r ? <Row label="Workshop rating">{ratingTitle(r).replace('Workshop rating: ', '')}</Row> : null;
           })()}
-          {!!mod.gameVersionTags?.length && <Row label="Game versions">{mod.gameVersionTags.join(', ')}</Row>}
+          {!!mod.gameVersionTags?.length && (
+            <Row label="Game versions">
+              {mod.gameVersionTags.join(', ')}
+              {mod.steamAppId && (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="btn btn-xs"
+                    title="Search the Workshop for a continued / updated version of this mod (opens in Steam)"
+                    onClick={() => void window.modHub?.openWorkshopSearch(mod.steamAppId!, `${mod.title.replace(/\s*\((continued|fork(ed)?|updated)\)\s*$/i, '')} continued`)}
+                  >
+                    Find continued version
+                  </button>
+                </>
+              )}
+            </Row>
+          )}
           {!!mod.workshopCategories?.length && <Row label="Categories">{mod.workshopCategories.join(', ')}</Row>}
           <Row label="On disk">
             <span className="detail-path">{diskPath}</span>{' '}

@@ -1,4 +1,4 @@
-# Agent runner: build Mod Hub, restart it, run deploy probe. Output -> mod-hub\logs\agent-run-latest.log
+# Agent runner: build ModKeeper, restart it, run deploy probe. Output -> mod-hub\logs\agent-run-latest.log
 # Read child-process output (npm/vite/node) as UTF-8 so symbols like the check mark don't turn into mojibake.
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -25,7 +25,7 @@ Log '--- npm run build ---'
 npm run build 2>&1 | ForEach-Object { Log "$_" }
 Log "BUILD_EXIT=$LASTEXITCODE"
 
-Log '--- stopping running Mod Hub ---'
+Log '--- stopping running ModKeeper ---'
 $me = $PID
 $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$me").ParentProcessId
 $escaped = [regex]::Escape($modHubDir)
@@ -45,7 +45,7 @@ Get-Process electron -ErrorAction SilentlyContinue | Where-Object { $_.Path -mat
 }
 Start-Sleep -Seconds 2
 
-Log '--- starting Mod Hub (new window) ---'
+Log '--- starting ModKeeper (new window) ---'
 $start = Join-Path $PSScriptRoot 'start-mod-hub.ps1'
 Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$start`"" -WorkingDirectory $modHubDir
 Log "started via $start"

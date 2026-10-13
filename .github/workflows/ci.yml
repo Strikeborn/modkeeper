@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-test:
-    # Mod Hub is a Windows app (Steam/Vortex/MO2 paths, tasklist); test where it runs.
+    # ModKeeper is a Windows app (Steam/Vortex/MO2 paths, tasklist); test where it runs.
     runs-on: windows-latest
     env:
       # Builds and tests don't need the Electron binary itself.

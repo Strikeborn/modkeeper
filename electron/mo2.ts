@@ -6,7 +6,7 @@ import { stableIdFromParts } from './scanHelpers';
 
 /**
  * Mod Organizer 2: portable installs (registered as the nxm handler) and global instances in
- * %LOCALAPPDATA%\ModOrganizer. Mod Hub reads them (mods, profiles, load order) and launches through them;
+ * %LOCALAPPDATA%\ModOrganizer. ModKeeper reads them (mods, profiles, load order) and launches through them;
  * MO2 stays the owner of its profiles, so nothing here writes MO2 files.
  */
 

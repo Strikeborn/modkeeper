@@ -13,6 +13,7 @@ import { BulkKeepDialog } from './components/BulkKeepDialog';
 import { onOpenModDetails } from './utils/modDetails';
 import { setSimilarModsSource } from './utils/similarMods';
 import { toast } from './utils/toast';
+import { latestVersionTag, missesVersion } from './utils/modVersions';
 import { displayGameName } from './utils/gameDisplay';
 import { workshopDisplayTitle } from './utils/workshopLabels';
 import { HubNavigationProvider, useHubNavigation } from './context/HubNavigation';
@@ -22,6 +23,8 @@ import { NexusView } from './views/NexusView';
 import { GamesView } from './views/GamesView';
 import { LoadoutsView } from './views/LoadoutsView';
 import { DuplicatesView } from './views/DuplicatesView';
+import { EmulationView } from './views/EmulationView';
+import { MinecraftView } from './views/MinecraftView';
 import { PlayButton } from './components/PlayButton';
 import { SettingsView } from './views/SettingsView';
 
@@ -92,6 +95,8 @@ function AppInner() {
   const deferredQuery = useDeferredValue(query);
   const [inGameFilter, setInGameFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
   const [updatesOnly, setUpdatesOnly] = useState(false);
+  /** Show only mods not tagged for the newest game version (e.g. RimWorld 1.6). */
+  const [versionGapOnly, setVersionGapOnly] = useState(false);
   const [sortMode, setSortMode] = useState<'title' | 'load-order'>('title');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'nexus-vortex' | 'steam-workshop' | 'local' | 'other'>(
     'all',
@@ -153,7 +158,7 @@ function AppInner() {
     void refreshLoadOrders();
   }, [refreshLoadOrders]);
 
-  // The enabled list can change in-game (mod menu); re-read when Mod Hub regains focus.
+  // The enabled list can change in-game (mod menu); re-read when ModKeeper regains focus.
   useEffect(() => {
     const onFocus = () => void refreshLoadOrders();
     window.addEventListener('focus', onFocus);
@@ -253,7 +258,7 @@ function AppInner() {
 
   async function runScan() {
     if (!window.modHub) {
-      setStatus('Use the Mod Hub desktop window (Desktop\\games\\Mod Hub.lnk), not a browser tab.');
+      setStatus('Use the ModKeeper desktop window (Desktop\\games\\ModKeeper.lnk), not a browser tab.');
       return;
     }
     setScanning(true);
@@ -314,6 +319,19 @@ function AppInner() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [visibleCatalog]);
 
+  /** Newest version tag among the shown game's mods (only for one game at a time). */
+  const latestTag = useMemo(
+    () => (gameFilter === 'all' ? null : latestVersionTag(visibleCatalog.mods.filter((m) => m.gameId === gameFilter))),
+    [visibleCatalog.mods, gameFilter],
+  );
+  const versionGapCount = useMemo(
+    () => (latestTag ? visibleCatalog.mods.filter((m) => m.gameId === gameFilter && missesVersion(m, latestTag)).length : 0),
+    [visibleCatalog.mods, gameFilter, latestTag],
+  );
+  useEffect(() => {
+    if (!latestTag) setVersionGapOnly(false);
+  }, [latestTag]);
+
   const filtered = useMemo(() => {
     let list = visibleCatalog.mods;
     if (gameFilter !== 'all') list = list.filter((m) => m.gameId === gameFilter);
@@ -325,6 +343,7 @@ function AppInner() {
         (m) => !isNexusLikeSource(m) && m.source !== 'steam-workshop' && m.source !== 'local',
       );
     if (updatesOnly) list = list.filter(hasUpdate);
+    if (versionGapOnly && latestTag) list = list.filter((m) => missesVersion(m, latestTag));
     if (inGameFilter !== 'all') {
       const want = inGameFilter === 'enabled';
       list = list.filter((m) => loadStates.get(m.id)?.enabled === want);
@@ -348,7 +367,7 @@ function AppInner() {
       list = [...list].sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
     }
     return list;
-  }, [visibleCatalog.mods, deferredQuery, gameFilter, sourceFilter, inGameFilter, updatesOnly, sortMode, loadStates, loadOrders]);
+  }, [visibleCatalog.mods, deferredQuery, gameFilter, sourceFilter, inGameFilter, updatesOnly, versionGapOnly, latestTag, sortMode, loadStates, loadOrders]);
 
   /** Mods with a newer version on the Workshop or Nexus, for the current game filter. */
   const updateCount = useMemo(
@@ -393,7 +412,7 @@ function AppInner() {
     };
   }, [issueGame, pendingOrder, loadOrders]);
 
-  // Skyrim: newest Crash Logger log (re-read with the load order, e.g. when Mod Hub regains focus after a crash).
+  // Skyrim: newest Crash Logger log (re-read with the load order, e.g. when ModKeeper regains focus after a crash).
   const [crash, setCrash] = useState<CrashReport | null>(null);
   useEffect(() => {
     if (!pluginGame || !window.modHub?.getCrashReport) {
@@ -756,6 +775,16 @@ function AppInner() {
                   >
                     ⬆ Updates ({updateCount})
                   </button>
+                  {latestTag && versionGapCount > 0 && (
+                    <button
+                      type="button"
+                      className={`btn btn-sm${versionGapOnly ? ' btn-active' : ''}`}
+                      title={`Mods whose Workshop page isn't tagged for ${latestTag}, the newest version among this game's mods. Open one to search for a continued version.`}
+                      onClick={() => setVersionGapOnly((v) => !v)}
+                    >
+                      Not on {latestTag} ({versionGapCount})
+                    </button>
+                  )}
                   <label
                     className="toolbar-select"
                     title="Enabled in the game's own mod list (RimWorld, Project Zomboid, Isaac). Other games: not filtered."
@@ -940,8 +969,8 @@ function AppInner() {
         {!window.modHub && (
           <p className="message message-error">
             {inElectron
-              ? 'Preload bridge missing — restart Mod Hub from the desktop shortcut.'
-              : 'Open Mod Hub from Desktop\\games\\Mod Hub.lnk (not localhost in a browser).'}
+              ? 'Preload bridge missing — restart ModKeeper from the desktop shortcut.'
+              : 'Open ModKeeper from Desktop\\games\\ModKeeper.lnk (not localhost in a browser).'}
           </p>
         )}
         {scanning && <ScanProgressPanel progress={scanProgress} startedAt={scanStartedAt.current} />}
@@ -1108,6 +1137,7 @@ function AppInner() {
               onDismiss={onDismiss}
               onSubscribe={onSubscribe}
               onDeleteLocal={setDeleteTarget}
+              neverScanned={catalog.mods.length === 0 && !catalog.scannedAt}
             />
           )}
           {tab === 'steam' && (
@@ -1139,6 +1169,8 @@ function AppInner() {
           {tab === 'duplicates' && (
             <DuplicatesView catalog={catalog} hiddenGames={hiddenGames} loadStates={loadStates} onToggleEnabled={onToggleEnabled} />
           )}
+          {tab === 'minecraft' && <MinecraftView />}
+          {tab === 'emulation' && <EmulationView />}
           {tab === 'settings' && <SettingsView catalog={catalog} onSaved={reload} />}
         </main>
       </div>

@@ -4,10 +4,10 @@
 $OutputEncoding = [System.Text.Encoding]::UTF8
 $env:NO_COLOR = '1'
 $env:FORCE_COLOR = '0'
-#   .trigger-run  -> agent-run.ps1  (build, restart Mod Hub, probes)
+#   .trigger-run  -> agent-run.ps1  (build, restart ModKeeper, probes)
 #   .trigger-task -> agent-task.ps1 (runs tools/agent-task.mjs)
 $tools = $PSScriptRoot
-$host.UI.RawUI.WindowTitle = 'Mod Hub agent watcher'
+$host.UI.RawUI.WindowTitle = 'ModKeeper agent watcher'
 Write-Host "Watching $tools for agent triggers. Close this window to stop."
 while ($true) {
 	foreach ($pair in @(@('.trigger-run', 'agent-run.ps1'), @('.trigger-task', 'agent-task.ps1'))) {

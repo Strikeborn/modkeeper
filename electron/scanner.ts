@@ -28,6 +28,7 @@ import {
 import { splitWorkshopTags } from './workshopTags';
 import { scanVortexStateModMeta } from './vortexStateScanner';
 import { refreshModsVortexCorrelation } from './vortexCatalogRefresh';
+import { dataDir } from './dataDir';
 
 export { discoverSteamLibraries };
 
@@ -188,19 +189,19 @@ export async function scanAllMods(
   try {
     scanMo2Mods(addMod);
   } catch (e) {
-    console.warn('[Mod Hub] MO2 scan failed:', e);
+    console.warn('[ModKeeper] MO2 scan failed:', e);
   }
   tick('extra', 'Thunderstore profiles (r2modman)...');
   try {
     scanThunderstoreProfiles(addMod);
   } catch (e) {
-    console.warn('[Mod Hub] Thunderstore profile scan failed:', e);
+    console.warn('[ModKeeper] Thunderstore profile scan failed:', e);
   }
   tick('extra', 'Prism Launcher instances (Minecraft)...');
   try {
     scanPrismMods(addMod);
   } catch (e) {
-    console.warn('[Mod Hub] Prism scan failed:', e);
+    console.warn('[ModKeeper] Prism scan failed:', e);
   }
   tick('vortex', 'Vortex staging & downloads...');
   const vortexState = await scanVortexStateModMeta();
@@ -214,9 +215,9 @@ export async function scanAllMods(
   tick('vortex-meta', 'Vortex metadb (Nexus downloads + pictures)...');
   try {
     const v = syncArchiveVault();
-    console.log(`[Mod Hub] archive vault: ${v.linked} new hard links, ${v.already} already safe, ${v.skipped} on another drive, ${v.errors} errors`);
+    console.log(`[ModKeeper] archive vault: ${v.linked} new hard links, ${v.already} already safe, ${v.skipped} on another drive, ${v.errors} errors`);
   } catch (e) {
-    console.warn('[Mod Hub] archive vault sync failed:', e);
+    console.warn('[ModKeeper] archive vault sync failed:', e);
   }
   await scanVortexMetadb(addMod, (current) => {
     if (current % 500 === 0) tick('vortex-meta', `Vortex metadb rows... (${current})`, current);
@@ -334,7 +335,7 @@ export async function scanAllMods(
   }
 
   tick('enrich', 'Indexing Vortex downloads (zip + 7z via 7-Zip, inner .archive names)...');
-  const indexCachePath = path.join(process.env.APPDATA ?? '', 'mod-hub', 'download-archive-index.json');
+  const indexCachePath = path.join(dataDir(), 'download-archive-index.json');
   const archiveZipIndex = buildDownloadArchiveIndex((current, total) => {
     if (current % 25 === 0 || current === total) {
       tick('enrich', `Download archive index: ${current}/${total}...`, current, total);
@@ -380,7 +381,7 @@ export async function scanAllMods(
     rememberWorkshopDetails(mods);
     applyWorkshopArchive(mods);
   } catch (e) {
-    console.warn('[Mod Hub] workshop archive failed:', e);
+    console.warn('[ModKeeper] workshop archive failed:', e);
   }
 
   if (mods.some((m) => m.prism)) {
@@ -389,7 +390,7 @@ export async function scanAllMods(
       const n = await checkModrinthUpdates(mods);
       if (n) tick('enrich', `Modrinth: ${n} update(s) available`);
     } catch (e) {
-      console.warn('[Mod Hub] Modrinth update check failed:', e);
+      console.warn('[ModKeeper] Modrinth update check failed:', e);
     }
   }
 
@@ -566,7 +567,7 @@ function scanIsaacGameMods(modsDir: string, addMod: (m: ModRecord) => void) {
   }
   for (const e of entries) {
     if (!e.isDirectory()) continue;
-    // Mod Hub's own kept copies come back from the saved catalog (they keep their kept metadata).
+    // ModKeeper's own kept copies come back from the saved catalog (they keep their kept metadata).
     if (/\(kept( \d+)?\)$/i.test(e.name)) continue;
     const localPath = path.join(modsDir, e.name);
     const metaFile = path.join(localPath, 'metadata.xml');

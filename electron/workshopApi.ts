@@ -13,6 +13,9 @@ export interface WorkshopDetails {
   votes_down?: number;
   score?: number;
   tags?: string[];
+  description?: string;
+  lifetime_subscriptions?: number;
+  lifetime_favorited?: number;
 }
 
 export type WorkshopFetchProgress = (info: {
@@ -65,13 +68,13 @@ export async function fetchWorkshopDetailsWithStats(
       });
     } catch (e) {
       failedApiChunks += 1;
-      console.warn(`[Mod Hub] Workshop API chunk ${chunkIndex}/${chunkTotal} failed:`, e);
+      console.warn(`[ModKeeper] Workshop API chunk ${chunkIndex}/${chunkTotal} failed:`, e);
       done();
       return;
     }
     if (!res.ok) {
       failedApiChunks += 1;
-      console.warn(`[Mod Hub] Workshop API chunk ${chunkIndex}/${chunkTotal} HTTP ${res.status}`);
+      console.warn(`[ModKeeper] Workshop API chunk ${chunkIndex}/${chunkTotal} HTTP ${res.status}`);
       done();
       return;
     }
@@ -107,6 +110,9 @@ export async function fetchWorkshopDetailsWithStats(
         votes_up: d.votes_up != null ? Number(d.votes_up) : undefined,
         votes_down: d.votes_down != null ? Number(d.votes_down) : undefined,
         score: d.score != null ? Number(d.score) : undefined,
+        description: typeof d.description === 'string' ? d.description : undefined,
+        lifetime_subscriptions: d.lifetime_subscriptions != null ? Number(d.lifetime_subscriptions) : undefined,
+        lifetime_favorited: d.lifetime_favorited != null ? Number(d.lifetime_favorited) : undefined,
         tags: Array.isArray(d.tags)
           ? (d.tags as Array<{ tag?: string }>).map((t) => String(t.tag ?? t)).filter(Boolean)
           : undefined,
@@ -124,7 +130,7 @@ export async function fetchWorkshopDetailsWithStats(
   );
 
   if (failedApiChunks > 0) {
-    console.warn(`[Mod Hub] Workshop API: ${failedApiChunks}/${chunkTotal} chunk(s) failed`);
+    console.warn(`[ModKeeper] Workshop API: ${failedApiChunks}/${chunkTotal} chunk(s) failed`);
   }
 
   return { map, failedChunks: failedApiChunks };

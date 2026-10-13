@@ -11,9 +11,11 @@ const MAIN: { id: HubTab; label: string }[] = [
   { id: 'library', label: 'All mods' },
   { id: 'steam', label: 'Steam' },
   { id: 'nexus', label: 'Nexus' },
+  { id: 'minecraft', label: 'Minecraft' },
   { id: 'games', label: 'Games' },
   { id: 'loadouts', label: 'Loadouts' },
   { id: 'duplicates', label: 'Duplicates' },
+  { id: 'emulation', label: 'Emulation' },
 ];
 
 function GearIcon() {
@@ -31,7 +33,7 @@ export function Sidebar({ tab, onTab, collapsed, onToggleCollapsed }: Props) {
   return (
     <aside className={`sidebar${collapsed ? ' sidebar-collapsed' : ''}`}>
       <div className="sidebar-head">
-        <h1 title="Mod Hub">{collapsed ? 'MH' : 'Mod Hub'}</h1>
+        <h1 title="ModKeeper">{collapsed ? 'MK' : 'ModKeeper'}</h1>
         <button
           type="button"
           className="sidebar-collapse-btn"

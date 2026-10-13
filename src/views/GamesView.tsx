@@ -16,13 +16,17 @@ type GameFilter = 'all' | 'installed' | 'owned' | 'has-mods';
 const NON_GAME_APP_IDS = new Set([228980, 241100]);
 
 export function GamesView({ catalog }: Props) {
-  const { openGameInstalled } = useHubNavigation();
+  const { openGameInstalled, setTab } = useHubNavigation();
   const [steamGames, setSteamGames] = useState<SteamLibraryGame[]>([]);
   const [filter, setFilter] = useState<GameFilter>('all');
   // Play options load when a card is first hovered; keep them loaded afterwards.
   const [hovered, setHovered] = useState<string | null>(null);
   const [played, setPlayed] = useState<Set<string>>(new Set());
   const [updates, setUpdates] = useState<Record<number, { bytes?: number }>>({});
+  const [localGames, setLocalGames] = useState<Record<string, { installed: boolean; art?: string; via?: string }>>({});
+  useEffect(() => {
+    void window.modHub?.getLocalGames?.().then(setLocalGames);
+  }, [catalog.scannedAt]);
 
   useEffect(() => {
     window.modHub?.getSteamLibraryGames().then(setSteamGames);
@@ -46,7 +50,9 @@ export function GamesView({ catalog }: Props) {
         name: g.name,
         appId: g.steamAppId ?? steamAppIdForGameId(g.id),
         localMods: modCountForGame(catalog, g.id),
-        ownedOnDisk: sg?.ownedOnDisk ?? false,
+        ownedOnDisk: sg?.ownedOnDisk ?? localGames[g.id]?.installed ?? false,
+        art: localGames[g.id]?.art,
+        via: localGames[g.id]?.via,
       };
     });
 
@@ -58,6 +64,8 @@ export function GamesView({ catalog }: Props) {
         appId: sg.appId,
         localMods: sg.localModCount,
         ownedOnDisk: sg.ownedOnDisk,
+        art: undefined as string | undefined,
+        via: undefined as string | undefined,
       }));
 
     let list = [...registry, ...extra].filter((g) => !g.appId || !NON_GAME_APP_IDS.has(g.appId));
@@ -67,7 +75,7 @@ export function GamesView({ catalog }: Props) {
       if (a.ownedOnDisk !== b.ownedOnDisk) return a.ownedOnDisk ? -1 : 1;
       return b.localMods - a.localMods || a.name.localeCompare(b.name);
     });
-  }, [catalog, steamGames, filter]);
+  }, [catalog, steamGames, filter, localGames]);
 
   return (
     <>
@@ -76,7 +84,7 @@ export function GamesView({ catalog }: Props) {
           Show
           <select value={filter} onChange={(e) => setFilter(e.target.value as GameFilter)}>
             <option value="all">All known games</option>
-            <option value="installed">Installed on disk (Steam)</option>
+            <option value="installed">Installed on disk</option>
             <option value="owned">Owned / installed only</option>
             <option value="has-mods">Has local mods</option>
           </select>
@@ -86,19 +94,27 @@ export function GamesView({ catalog }: Props) {
         {cards.map((g) => (
           <div
             key={g.id}
-            className={`game-card${g.localMods === 0 && !g.ownedOnDisk ? ' is-disabled' : ''}`}
+            className={`game-card${g.localMods === 0 && !g.ownedOnDisk && g.id !== 'minecraft' ? ' is-disabled' : ''}`}
             role="button"
             tabIndex={0}
-            title={g.localMods ? `Show ${g.name}'s mods` : g.name}
+            title={g.id === 'minecraft' ? 'Open the Minecraft tab' : g.localMods ? `Show ${g.name}'s mods` : g.name}
             onMouseEnter={() => setHovered(g.id)}
             onFocus={() => setHovered(g.id)}
-            onClick={() => g.localMods > 0 && openGameInstalled(g.id.startsWith('steam-') ? 'all' : g.id)}
+            onClick={() => (g.id === 'minecraft' ? setTab('minecraft') : g.localMods > 0 && openGameInstalled(g.id.startsWith('steam-') ? 'all' : g.id))}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && g.localMods > 0) openGameInstalled(g.id.startsWith('steam-') ? 'all' : g.id);
+              if (e.key !== 'Enter') return;
+              if (g.id === 'minecraft') setTab('minecraft');
+              else if (g.localMods > 0) openGameInstalled(g.id.startsWith('steam-') ? 'all' : g.id);
             }}
           >
             <div className="game-card-art">
-              {g.appId ? <GameCoverImage appId={g.appId} name={g.name} /> : <span>{g.name.slice(0, 1)}</span>}
+              {g.art ? (
+                <img src={g.art} alt="" />
+              ) : g.appId ? (
+                <GameCoverImage appId={g.appId} name={g.name} />
+              ) : (
+                <span>{g.name.slice(0, 1)}</span>
+              )}
               {g.appId && updates[g.appId] && (
                 <span
                   className="game-update-badge"
@@ -117,7 +133,7 @@ export function GamesView({ catalog }: Props) {
               <h3>{g.name}</h3>
               <span>
                 {g.localMods} local mods
-                {g.ownedOnDisk ? ' · Installed' : ''}
+                {g.ownedOnDisk ? ` · Installed${g.via ? ` (${g.via})` : ''}` : ''}
               </span>
             </div>
           </div>

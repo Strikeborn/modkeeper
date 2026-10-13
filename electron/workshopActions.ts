@@ -113,7 +113,7 @@ export function keepDestinationLabel(gameId: string): string {
     case 'terraria':
       return 'Terraria\\ResourcePacks (enable it in-game)';
     default:
-      return "Mod Hub's kept-mods folder (backup only — the game won't load it)";
+      return "ModKeeper's kept-mods folder (backup only — the game won't load it)";
   }
 }
 
@@ -141,7 +141,7 @@ async function placeCopy(src: string, dest: string, keptRoot: string, mod: ModRe
 /**
  * Copy a Workshop item somewhere Steam won't touch.
  * Project Zomboid / RimWorld / Isaac / Terraria: into the game's own local mods folder (the game still loads it).
- * Everything else: Mod Hub's kept-mods archive.
+ * Everything else: ModKeeper's kept-mods archive.
  */
 export async function keepWorkshopCopy(mod: ModRecord, keptRoot: string, opts: KeepOptions = {}): Promise<KeepResult> {
   const src = opts.source ?? mod.localPath;
@@ -197,7 +197,7 @@ export async function keepWorkshopCopy(mod: ModRecord, keptRoot: string, opts: K
       }
     }
     const dest = await placeCopy(src, path.join(keptRoot, mod.gameId, id), keptRoot, mod, replace);
-    return { ok: true, keptPath: dest, keptPaths: [dest], note: `Copied to Mod Hub's kept mods: ${dest}` };
+    return { ok: true, keptPath: dest, keptPaths: [dest], note: `Copied to ModKeeper's kept mods: ${dest}` };
   } catch (e) {
     return { ok: false, note: `Copy failed: ${e instanceof Error ? e.message : String(e)}` };
   }

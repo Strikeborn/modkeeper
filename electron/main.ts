@@ -1,12 +1,12 @@
 import type { GameRecord } from '../shared/types';
-import { app, BrowserWindow, ipcMain, shell, dialog, session, webContents, screen, protocol } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, session, webContents, screen, protocol, nativeImage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { CatalogStore } from './catalogStore';
 import { discoverSteamLibraries, scanAllMods } from './scanner';
 import { fetchWorkshopDetails, workshopItemUrl, workshopSubscribeUrl } from './workshopApi';
-import { queryWorkshopBrowse } from './workshopBrowse';
+import { queryWorkshopBrowse, workshopItemsByIds } from './workshopBrowse';
 import { listInstalledSteamAppIds } from './steamLibraryApps';
 import { GAMES_REGISTRY, gameById, gameBySteamAppId } from './gamesRegistry';
 import { steamAppDisplayName } from './steamAppNames';
@@ -15,6 +15,45 @@ import { pzDefaultModsFile, readLoadOrders } from './loadOrder';
 import { isPluginGame, lootExe, planPluginOrder, pluginContext, pluginLoadOrder, pluginSync, setPluginModsEnabled, setPluginOrder } from './bethesdaPlugins';
 import { latestCrash } from './crashLogs';
 import { prismLoadOrder, setPrismModsEnabled } from './prism';
+import { localGames } from './localGames';
+import { findMcInstances, launcherInstalled, launchMcInstance, mcInstanceById, mcInstanceRunning, openMcLauncher } from './mcInstances';
+import {
+  applyMcModList,
+  backupWorld,
+  renameWorld,
+  itemPath,
+  kindDir,
+  listMcContent,
+  moveResourcePack,
+  screenshotPath,
+  setActiveShader,
+  setModEnabled,
+  setResourcePackEnabled,
+} from './mcContent';
+import { checkMcUpdates, installMc, searchMc, updateMcItem } from './mcBrowse';
+import { renderWorldMap, worldDetails } from './mcWorld';
+import { defaultEmulationRoot, launchEmulator, playRom, scanEmulationLibrary } from './emulation';
+import {
+  addShipMods,
+  applyShipModList,
+  buildPort,
+  forgetShipMod,
+  isShipPack,
+  launchPortTarget,
+  listShipMods,
+  moveShipMod,
+  renameShipMod,
+  replaceShipMod,
+  setShipAltAssets,
+  setShipModEnabled,
+  shipIsRunning,
+  MOD_PORTS,
+  type ModPort,
+} from './pcPorts';
+import { bestMatch, newerFile } from './shipUpdates';
+import { downloadGbFile, GB_PORT_GAMES, gbModDetails, listGbMods, packsFromDownload, pickFile, searchGbGames } from './gamebanana';
+import { defenderScan } from './security';
+import { listPathsWith7z } from './sevenZipList';
 import { migrateVortexToMo2, planVortexToMo2 } from './mo2Migrate';
 import { bg3ScriptExtenderInstalled, installedPaks, planBg3Order, readModsettings } from './bg3Checks';
 import { planPzOrder } from './pzDeps';
@@ -87,11 +126,13 @@ import {
   validateNexusKey,
   fetchTrackedModIds,
 } from './nexusApi';
+import { dataDir } from './dataDir';
+import { matchesHotkey } from './hotkey';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Same data folder for the installed app ("Mod Hub") and dev builds ("mod-hub"): %APPDATA%\mod-hub.
-app.setPath('userData', path.join(app.getPath('appData'), 'mod-hub'));
+// Same data folder for the installed app and dev builds: %APPDATA%\mod-hub, or MODKEEPER_DATA_DIR (see dataDir.ts).
+app.setPath('userData', dataDir());
 
 let store: CatalogStore;
 let mainWindow: BrowserWindow | null = null;
@@ -112,7 +153,7 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-/** Stable key for "removed from Mod Hub" (survives rescans that regenerate row ids). */
+/** Stable key for "removed from ModKeeper" (survives rescans that regenerate row ids). */
 function dismissKey(m: { id: string; nexusModId?: number; nexusGameDomain?: string }): string {
   return m.nexusModId && m.nexusGameDomain ? `${m.nexusGameDomain.toLowerCase()}|${m.nexusModId}` : m.id;
 }
@@ -132,12 +173,12 @@ function folderSize(dir: string): number {
 
 let devToolsWindow: BrowserWindow | null = null;
 
-/** Dev only: DevTools in its own maximized window behind Mod Hub. */
+/** Dev only: DevTools in its own maximized window behind ModKeeper. */
 function openDevToolsIfDev(win: BrowserWindow) {
   if (!isDev) return;
   try {
     devToolsWindow = new BrowserWindow({
-      title: 'Mod Hub DevTools',
+      title: 'ModKeeper DevTools',
       show: false,
       autoHideMenuBar: true,
       backgroundColor: '#202124',
@@ -151,7 +192,7 @@ function openDevToolsIfDev(win: BrowserWindow) {
     });
     win.webContents.setDevToolsWebContents(devToolsWindow.webContents);
     win.webContents.openDevTools({ mode: 'detach', activate: false });
-    // Show invisibly, push it behind Mod Hub, then fade it in so it never flashes over the app.
+    // Show invisibly, push it behind ModKeeper, then fade it in so it never flashes over the app.
     devToolsWindow.maximize();
     devToolsWindow.showInactive();
     win.moveTop();
@@ -165,7 +206,7 @@ function openDevToolsIfDev(win: BrowserWindow) {
       }
     }, 400);
   } catch (e) {
-    console.warn('[Mod Hub] openDevTools failed:', e);
+    console.warn('[ModKeeper] openDevTools failed:', e);
   }
 }
 
@@ -185,7 +226,7 @@ function createWindow() {
     height: sh,
     minWidth: 960,
     minHeight: 640,
-    title: 'Mod Hub',
+    title: 'ModKeeper',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     show: false,
     webPreferences: {
@@ -198,12 +239,21 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
-    console.error('[Mod Hub] Preload failed:', preloadPath, error);
+    console.error('[ModKeeper] Preload failed:', preloadPath, error);
+  });
+
+  // Fullscreen hotkey (only while ModKeeper has focus, so games never lose the key).
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.isAutoRepeat) return;
+    const hotkey = store.loadSettings().fullscreenHotkey || 'F11';
+    if (!matchesHotkey(hotkey, input) || !mainWindow) return;
+    event.preventDefault();
+    mainWindow.setFullScreen(!mainWindow.isFullScreen());
   });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.maximize();
-    mainWindow?.setFullScreen(true);
+    if (store.loadSettings().startFullscreen !== false) mainWindow?.setFullScreen(true);
     mainWindow?.show();
     mainWindow?.focus();
     setTimeout(() => {
@@ -326,7 +376,7 @@ function registerIpc() {
       const extra =
         event.current != null && event.total != null ? ` (${event.current}/${event.total})` : '';
       const pct = event.percent != null ? ` ${event.percent}%` : '';
-      console.log(`[Mod Hub scan] ${event.phase}${pct}: ${event.message}${extra}`);
+      console.log(`[ModKeeper scan] ${event.phase}${pct}: ${event.message}${extra}`);
       mainWindow?.webContents.send('modhub:scan-progress', event);
     };
     const { mods, report } = await scanAllMods(
@@ -396,9 +446,9 @@ function registerIpc() {
         store.saveCatalog(fresh);
         mainWindow?.webContents.send('modhub:catalog-updated');
       }
-      console.log(`[Mod Hub] Nexus updates: ${r.checked} mods checked, ${r.updates} with a newer version`);
+      console.log(`[ModKeeper] Nexus updates: ${r.checked} mods checked, ${r.updates} with a newer version`);
     } catch (e) {
-      console.warn('[Mod Hub] Nexus update check failed:', e);
+      console.warn('[ModKeeper] Nexus update check failed:', e);
     } finally {
       nexusUpdateRunning = false;
     }
@@ -439,9 +489,9 @@ function registerIpc() {
         store.saveCatalog(fresh);
         mainWindow?.webContents.send('modhub:catalog-updated');
       }
-      console.log(`[Mod Hub] Workshop community: ${votesDue ? 'ratings refreshed' : 'ratings fresh'}; ${reuploads} re-upload check(s) changed`);
+      console.log(`[ModKeeper] Workshop community: ${votesDue ? 'ratings refreshed' : 'ratings fresh'}; ${reuploads} re-upload check(s) changed`);
     } catch (e) {
-      console.warn('[Mod Hub] Workshop community refresh failed:', e);
+      console.warn('[ModKeeper] Workshop community refresh failed:', e);
     } finally {
       communityRunning = false;
     }
@@ -480,10 +530,10 @@ function registerIpc() {
         };
       });
       store.saveCatalog(fresh);
-      console.log(`[Mod Hub] Nexus fill-in: updated ${changed.size} mod(s) with ${r.called} API call(s); ${r.skipped} still waiting`);
+      console.log(`[ModKeeper] Nexus fill-in: updated ${changed.size} mod(s) with ${r.called} API call(s); ${r.skipped} still waiting`);
       mainWindow?.webContents.send('modhub:catalog-updated');
     } catch (e) {
-      console.warn('[Mod Hub] Nexus fill-in failed:', e);
+      console.warn('[ModKeeper] Nexus fill-in failed:', e);
     } finally {
       nexusFillRunning = false;
     }
@@ -492,9 +542,9 @@ function registerIpc() {
   const loadCatalogForWindow = async () => {
     try {
       const v = syncArchiveVault();
-      if (v.linked) console.log(`[Mod Hub] archive vault: ${v.linked} new hard links (${v.already} already safe)`);
+      if (v.linked) console.log(`[ModKeeper] archive vault: ${v.linked} new hard links (${v.already} already safe)`);
     } catch (e) {
-      console.warn('[Mod Hub] archive vault sync failed:', e);
+      console.warn('[ModKeeper] archive vault sync failed:', e);
     }
     const cat = store.loadCatalog();
     let dirty = false;
@@ -523,11 +573,11 @@ function registerIpc() {
       ) {
         dirty = true;
         console.log(
-          `[Mod Hub] Vortex correlation: ${correlation.deployment.linked} deployed links, ${correlation.deployment.enriched} enriched, ${correlation.mergedCount} rows merged`,
+          `[ModKeeper] Vortex correlation: ${correlation.deployment.linked} deployed links, ${correlation.deployment.enriched} enriched, ${correlation.mergedCount} rows merged`,
         );
       }
     } catch (e) {
-      console.warn('[Mod Hub] Vortex state metadata refresh failed:', e);
+      console.warn('[ModKeeper] Vortex state metadata refresh failed:', e);
     }
     if (applyWorkshopSubscriptionState(cat.mods) > 0) {
       for (const m of cat.mods) {
@@ -572,11 +622,11 @@ function registerIpc() {
     if (dirty) store.saveCatalog(cat);
     // Isaac LuaDebug guard: switch REPENTOGON's LuaDebug back off if something turned it on.
     if (store.loadSettings().isaacLuaDebugGuard !== false && enforceLuaDebugOff()) {
-      console.log('[Mod Hub] Isaac LuaDebug was on; switched it back off (backup in mod-hub\\backups).');
+      console.log('[ModKeeper] Isaac LuaDebug was on; switched it back off (backup in mod-hub\\backups).');
       setTimeout(
         () =>
           mainWindow?.webContents.send('modhub:toast', {
-            message: 'Isaac LuaDebug was turned on (no Lua sandbox for any mod). Mod Hub switched it back off.',
+            message: 'Isaac LuaDebug was turned on (no Lua sandbox for any mod). ModKeeper switched it back off.',
             kind: 'error',
           }),
         1500,
@@ -584,7 +634,7 @@ function registerIpc() {
     }
     const bySource = cat.mods.reduce<Record<string, number>>((a, m) => ((a[m.source] = (a[m.source] ?? 0) + 1), a), {});
     console.log(
-      `[Mod Hub] Catalog loaded: ${cat.mods.length} mods across ${new Set(cat.mods.map((m) => m.gameId)).size} games (${Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join(', ')})${dirty ? ' - saved fixes' : ''}`,
+      `[ModKeeper] Catalog loaded: ${cat.mods.length} mods across ${new Set(cat.mods.map((m) => m.gameId)).size} games (${Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join(', ')})${dirty ? ' - saved fixes' : ''}`,
     );
     return cat;
   };
@@ -597,13 +647,13 @@ function registerIpc() {
       const sk = pluginLoadOrder('skyrimse', mods, store.loadSettings().playChoices?.skyrimse);
       if (sk) out.skyrimse = sk;
     } catch (e) {
-      console.warn('[Mod Hub] Skyrim plugin list read failed:', e);
+      console.warn('[ModKeeper] Skyrim plugin list read failed:', e);
     }
     try {
       const mc = prismLoadOrder(mods, store.loadSettings().playChoices?.minecraft);
       if (mc) out.minecraft = mc;
     } catch (e) {
-      console.warn('[Mod Hub] Prism read failed:', e);
+      console.warn('[ModKeeper] Prism read failed:', e);
     }
     return out;
   });
@@ -620,7 +670,7 @@ function registerIpc() {
     const mods = store.loadCatalog().mods;
     const profile = store.loadSettings().playChoices?.[gameId]?.profile;
     const r = apply ? migrateVortexToMo2(gameId, mods, profile) : planVortexToMo2(gameId, mods, profile);
-    if (apply) console.log(`[Mod Hub] Vortex → MO2: ${r.message}`);
+    if (apply) console.log(`[ModKeeper] Vortex → MO2: ${r.message}`);
     return r;
   });
   ipcMain.handle('modhub:openSortTool', (_e, gameId: string) => {
@@ -631,7 +681,7 @@ function registerIpc() {
         spawn(ctx.inst.exe, ['-p', ctx.profile], { cwd: ctx.inst.root, detached: true, stdio: 'ignore' }).unref();
         return {
           ok: true,
-          message: `Opened MO2 on “${ctx.profile}”. In its Plugins tab, click Sort (runs LOOT inside MO2), then close MO2 so Mod Hub sees the new order.`,
+          message: `Opened MO2 on “${ctx.profile}”. In its Plugins tab, click Sort (runs LOOT inside MO2), then close MO2 so ModKeeper sees the new order.`,
         };
       }
       const loot = lootExe();
@@ -678,13 +728,13 @@ function registerIpc() {
         baseline,
         (done, total, current) => {
           send(done, total, current);
-          if (done % 10 === 0 && done < total) console.log(`[Mod Hub] Malware check ${done}/${total}: ${current}`);
+          if (done % 10 === 0 && done < total) console.log(`[ModKeeper] Malware check ${done}/${total}: ${current}`);
         },
         { allWithExecutables: all, shouldStop: () => securityStop },
       );
       mainWindow?.webContents.send('modhub:security-progress', { done: r.checked, total: r.total, current: '', running: false });
       console.log(
-        `[Mod Hub] Malware checks${r.stopped ? ' (stopped)' : ''}: ${r.inventoried} inventories refreshed, ${r.checked}/${r.total} mod(s) checked, ${r.threats} with findings`,
+        `[ModKeeper] Malware checks${r.stopped ? ' (stopped)' : ''}: ${r.inventoried} inventories refreshed, ${r.checked}/${r.total} mod(s) checked, ${r.threats} with findings`,
       );
       if (all || r.checked) {
         mainWindow?.webContents.send('modhub:toast', {
@@ -704,7 +754,7 @@ function registerIpc() {
         });
       }
     } catch (e) {
-      console.warn('[Mod Hub] malware check pass failed:', e);
+      console.warn('[ModKeeper] malware check pass failed:', e);
     } finally {
       securityRunning = false;
     }
@@ -734,14 +784,14 @@ function registerIpc() {
           app.getPath('userData'),
           (done, total, current) => {
             mainWindow?.webContents.send('modhub:security-progress', { done, total, current, running: done < total });
-            if (current) console.log(`[Mod Hub] Defender sweep ${done + 1}/${total}: ${current}`);
+            if (current) console.log(`[ModKeeper] Defender sweep ${done + 1}/${total}: ${current}`);
           },
           () => securityStop,
         );
         recordSweep(sweep);
         const secs = sweep.roots.reduce((a, r) => a + r.seconds, 0);
         const unavailable = sweep.roots.filter((r) => r.status === 'unavailable').length;
-        console.log(`[Mod Hub] Defender sweep: ${sweep.roots.length} folders in ${secs}s, ${sweep.threats.length} threat(s)`);
+        console.log(`[ModKeeper] Defender sweep: ${sweep.roots.length} folders in ${secs}s, ${sweep.threats.length} threat(s)`);
         mainWindow?.webContents.send('modhub:security-progress', { done: sweep.roots.length, total: sweep.roots.length, current: '', running: false });
         mainWindow?.webContents.send('modhub:toast', {
           message: sweep.threats.length
@@ -751,7 +801,7 @@ function registerIpc() {
         });
         mainWindow?.webContents.send('modhub:catalog-updated');
       } catch (e) {
-        console.warn('[Mod Hub] Defender sweep failed:', e);
+        console.warn('[ModKeeper] Defender sweep failed:', e);
       } finally {
         securityRunning = false;
       }
@@ -797,7 +847,7 @@ function registerIpc() {
     if (gameId === 'binding-of-isaac') {
       const lua = isaacLuaDebugState();
       if (lua.launcher && settings.isaacLuaDebugGuard !== false && enforceLuaDebugOff()) {
-        warnings.push('REPENTOGON had LuaDebug on (no Lua sandbox for any mod). Mod Hub switched it back off.');
+        warnings.push('REPENTOGON had LuaDebug on (no Lua sandbox for any mod). ModKeeper switched it back off.');
       } else if (lua.launcher) {
         warnings.push('LuaDebug is ON in REPENTOGON: every enabled mod can read/write files and run programs.');
       }
@@ -838,7 +888,7 @@ function registerIpc() {
     if (!opt) return { ok: false, message: 'That launch option is no longer available.' };
     const settings = store.loadSettings();
     store.saveSettings({ playChoices: { ...(settings.playChoices ?? {}), [gameId]: { optionId, profile } } });
-    console.log(`[Mod Hub] Play ${gameId} via ${opt.label}${profile ? ` (profile ${profile})` : ''}`);
+    console.log(`[ModKeeper] Play ${gameId} via ${opt.label}${profile ? ` (profile ${profile})` : ''}`);
     return launchPlayOption(opt, profile);
   });
 
@@ -901,10 +951,15 @@ function registerIpc() {
   ipcMain.handle('modhub:getSettings', () => store.loadSettings());
 
   ipcMain.handle('modhub:saveSettings', (_e, partial) => store.saveSettings(partial));
+  ipcMain.handle('modhub:isFullScreen', () => mainWindow?.isFullScreen() ?? false);
+  ipcMain.handle('modhub:setFullScreen', (_e, on: boolean) => {
+    mainWindow?.setFullScreen(Boolean(on));
+    return mainWindow?.isFullScreen() ?? false;
+  });
 
   ipcMain.handle('modhub:setFavorite', (_e, modId: string, favorited: boolean) => {
     store.setFavorite(modId, favorited);
-    console.log(`[Mod Hub] ${favorited ? 'Favorited' : 'Unfavorited'} ${modId}`);
+    console.log(`[ModKeeper] ${favorited ? 'Favorited' : 'Unfavorited'} ${modId}`);
     return store.updateMod(modId, { favorited });
   });
 
@@ -945,6 +1000,8 @@ function registerIpc() {
 
   // Steam keeps every library game's art in appcache/librarycache/{appId}/ (newer games: hashed subfolders).
   const steamArtNames = ['library_600x900.jpg', 'library_capsule.jpg', 'header.jpg', 'library_header.jpg', 'library_hero.jpg'];
+  ipcMain.handle('modhub:getLocalGames', () => localGames());
+  registerMinecraftIpc();
   ipcMain.handle('modhub:getSteamGameArt', async (_e, appId: number) => {
     for (const lib of discoverSteamLibraries()) {
       const root = path.join(lib, 'appcache', 'librarycache', String(appId));
@@ -1016,10 +1073,10 @@ function registerIpc() {
   ipcMain.handle('modhub:steamSubscribe', async (_e, appId: number, workshopId: string) => {
     const direct = await runSteamWorkshopAction(steamHelperPath(), 'subscribe', appId, workshopId);
     if (direct.ok) {
-      console.log(`[Mod Hub] Subscribed ${appId}/${workshopId} through Steam`);
+      console.log(`[ModKeeper] Subscribed ${appId}/${workshopId} through Steam`);
       return { ok: true, message: 'Subscribed through Steam. Steam downloads it in the background.' };
     }
-    console.warn('[Mod Hub] direct subscribe failed, opening Steam:', direct.error);
+    console.warn('[ModKeeper] direct subscribe failed, opening Steam:', direct.error);
     shell.openExternal(workshopSubscribeUrl(appId, workshopId));
     return {
       ok: true,
@@ -1090,7 +1147,7 @@ function registerIpc() {
       store.saveCatalog(cat);
     }
     console.log(
-      `[Mod Hub] Deleted ${removed.size} Workshop item(s), ${(bytes / 1e9).toFixed(2)} GB -> Recycle Bin in ${((Date.now() - t0) / 1000).toFixed(1)}s${failures.length ? `; ${failures.length} failed` : ''}`,
+      `[ModKeeper] Deleted ${removed.size} Workshop item(s), ${(bytes / 1e9).toFixed(2)} GB -> Recycle Bin in ${((Date.now() - t0) / 1000).toFixed(1)}s${failures.length ? `; ${failures.length} failed` : ''}`,
     );
     return {
       ok: failures.length === 0,
@@ -1127,7 +1184,7 @@ function registerIpc() {
         next.workshop = { appId, workshopId: link.id, title: link.title };
       }
       store.updateMod(modId, { crossLinks: Object.keys(next).length ? next : undefined });
-      console.log(`[Mod Hub] Cross-link ${mod.title}: ${link ? `${link.platform} ${link.id}` : `cleared ${platformToClear}`}`);
+      console.log(`[ModKeeper] Cross-link ${mod.title}: ${link ? `${link.platform} ${link.id}` : `cleared ${platformToClear}`}`);
       mainWindow?.webContents.send('modhub:catalog-updated');
       return {
         ok: true,
@@ -1213,7 +1270,7 @@ function registerIpc() {
         localPath: kept.keptPath ?? mod.localPath,
         revision: { ...mod.revision, value: newTs, updateAvailable: false },
       });
-      console.log(`[Mod Hub] Updated kept copy ${mod.title} -> ${kept.keptPath}`);
+      console.log(`[ModKeeper] Updated kept copy ${mod.title} -> ${kept.keptPath}`);
       mainWindow?.webContents.send('modhub:catalog-updated');
       return {
         ok: true,
@@ -1222,7 +1279,7 @@ function registerIpc() {
     }
 
     store.updateMod(mod.id, { revision: { ...mod.revision, value: newTs, updateAvailable: false } });
-    console.log(`[Mod Hub] Steam updated ${mod.title}`);
+    console.log(`[ModKeeper] Steam updated ${mod.title}`);
     mainWindow?.webContents.send('modhub:catalog-updated');
     return { ok: true, message: `Steam downloaded the latest version of “${mod.title}”.` };
   });
@@ -1285,7 +1342,7 @@ function registerIpc() {
     });
     store.saveCatalog(fresh);
     send(total, '', 'Done');
-    console.log(`[Mod Hub] Bulk keep: ${unsubscribed.size}/${total} kept + unsubscribed in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failures.length} problem(s)`);
+    console.log(`[ModKeeper] Bulk keep: ${unsubscribed.size}/${total} kept + unsubscribed in ${((Date.now() - t0) / 1000).toFixed(0)}s; ${failures.length} problem(s)`);
     return {
       ok: failures.length === 0,
       kept: unsubscribed.size,
@@ -1320,8 +1377,8 @@ function registerIpc() {
     store.saveSettings({ dismissedMods: [...new Set([...(settings.dismissedMods ?? []), key])] });
     cat.mods = cat.mods.filter((m) => m.id !== modId);
     store.saveCatalog(cat);
-    console.log(`[Mod Hub] Removed from list: ${mod.title} (${key})`);
-    return { ok: true, message: `Removed “${mod.title}” from Mod Hub. Scans won't add it back.` };
+    console.log(`[ModKeeper] Removed from list: ${mod.title} (${key})`);
+    return { ok: true, message: `Removed “${mod.title}” from ModKeeper. Scans won't add it back.` };
   });
 
   ipcMain.handle('modhub:workshopUnsubscribe', async (_e, modId: string, keepCopy: boolean) => {
@@ -1349,7 +1406,7 @@ function registerIpc() {
     }
 
     store.setSubscribed(mod.id, false);
-    console.log(`[Mod Hub] Unsubscribed ${mod.title} (${appId}/${mod.workshopId})${keptPath ? ` - kept copy at ${keptPath}` : ''}`);
+    console.log(`[ModKeeper] Unsubscribed ${mod.title} (${appId}/${mod.workshopId})${keptPath ? ` - kept copy at ${keptPath}` : ''}`);
     if (keptPath) {
       store.updateMod(mod.id, {
         id: keptModId(appId, mod.workshopId),
@@ -1396,7 +1453,7 @@ function registerIpc() {
       return { ok: false, message: 'Add a Nexus API key in Settings to track on your account.' };
     }
     const r = await trackMod(settings.nexusApiKey, gameDomain, modId, track);
-    console.log(`[Mod Hub] Nexus ${track ? 'track' : 'untrack'} ${gameDomain}/${modId}: ${r.ok ? 'ok' : r.message}`);
+    console.log(`[ModKeeper] Nexus ${track ? 'track' : 'untrack'} ${gameDomain}/${modId}: ${r.ok ? 'ok' : r.message}`);
     return r;
   });
 
@@ -1413,27 +1470,236 @@ function registerIpc() {
     return shell.openExternal(`steam://openurl/${url}`);
   });
 
+  // Emulation tab: ROM/emulator library (scan is read-only; Play/Launch only on the user's click)
+  let lastEmulation: import('../shared/types').EmulationLibrary | null = null;
+  const emulationRoot = () => store.loadSettings().emulationRoot || defaultEmulationRoot();
+  const rescanEmulation = async () =>
+    (lastEmulation = await scanEmulationLibrary(emulationRoot(), app.getPath('userData'), store.loadSettings().pcPortFolders ?? []));
+  ipcMain.handle('modhub:getEmulationLibrary', () => rescanEmulation());
+  ipcMain.handle('modhub:addPcPortFolder', async () => {
+    const r = await dialog.showOpenDialog({ title: 'PC port / decomp folder (e.g. a Project Picori checkout)', properties: ['openDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const list = [...new Set([...(store.loadSettings().pcPortFolders ?? []), r.filePaths[0]])];
+    store.saveSettings({ pcPortFolders: list });
+    return r.filePaths[0];
+  });
+  ipcMain.handle('modhub:removePcPortFolder', (_e, dir: string) => {
+    store.saveSettings({ pcPortFolders: (store.loadSettings().pcPortFolders ?? []).filter((d) => d !== dir) });
+  });
+  const portById = async (id: string) => (lastEmulation ?? (await rescanEmulation())).pcPorts.find((p) => p.id === id);
+  ipcMain.handle('modhub:playPcPort', async (_e, portId: string, label: string) => {
+    const port = await portById(portId);
+    return port ? launchPortTarget(port, label) : { ok: false, error: 'Port not found (rescan?)' };
+  });
+  ipcMain.handle('modhub:buildPcPort', async (e, portId: string, region: string) => {
+    const port = await portById(portId);
+    if (!port) return { ok: false, error: 'Port not found (rescan?)' };
+    const sender = e.sender;
+    return buildPort(port, region, (line) => {
+      if (!sender.isDestroyed()) sender.send('modhub:pcPortBuildLog', { portId, line });
+    });
+  });
+  const SHIP_SITES: Record<string, string> = {
+    gamebanana: 'https://gamebanana.com/search?_sSearchString=Ship%20of%20Harkinian',
+    website: 'https://www.shipofharkinian.com/',
+    github: 'https://github.com/HarbourMasters/Shipwright',
+  };
+  ipcMain.handle('modhub:openShipModSite', (_e, site: string) => {
+    const url = SHIP_SITES[site];
+    if (url) void shell.openExternal(url);
+  });
+  /** A mod-pack port (Ship, 2Ship, Starship) by id, if it's in the library. */
+  const modPort = async (id: unknown): Promise<ModPort | undefined> => {
+    const pid = (['soh', '2ship', 'starship'] as const).find((x) => x === id);
+    const dir = pid && (lastEmulation ?? (await rescanEmulation())).emulators.find((x) => x.id === pid)?.dir;
+    return pid && dir ? { id: pid, dir } : undefined;
+  };
+  const NO_PORT = 'That game isn’t in the emulation library';
+  ipcMain.handle('modhub:setShipModEnabled', async (_e, portId: string, modPath: string, enabled: boolean) => {
+    const dir = await modPort(portId);
+    return dir ? setShipModEnabled(dir, modPath, enabled) : { ok: false, error: NO_PORT };
+  });
+  ipcMain.handle('modhub:moveShipMod', async (_e, portId: string, modPath: string, delta: number) => {
+    const dir = await modPort(portId);
+    return dir ? moveShipMod(dir, String(modPath), Number(delta)) : { ok: false, error: NO_PORT };
+  });
+  ipcMain.handle('modhub:setShipAltAssets', async (_e, portId: string, on: boolean) => {
+    const dir = await modPort(portId);
+    return dir ? setShipAltAssets(dir, Boolean(on)) : { ok: false, error: NO_PORT };
+  });
+  ipcMain.handle('modhub:renameShipMod', async (_e, portId: string, modPath: string, newName: string) => {
+    const dir = await modPort(portId);
+    if (!dir) return { ok: false, error: NO_PORT };
+    const oldFile = path.basename(String(modPath));
+    const r = renameShipMod(dir, String(modPath), String(newName));
+    if (r.ok && r.file && r.file !== oldFile) renameShipRefs(dir, oldFile, r.file);
+    return r;
+  });
+  ipcMain.handle('modhub:deleteShipMod', async (_e, portId: string, modPath: string) => {
+    const dir = await modPort(portId);
+    if (!dir) return { ok: false, error: NO_PORT };
+    const file = path.normalize(String(modPath));
+    if (!isShipPack(dir, file) || !fs.existsSync(file)) return { ok: false, error: 'Not a Ship pack' };
+    if (shipIsRunning(dir)) return { ok: false, error: `Close ${MOD_PORTS[dir.id].name} first.` };
+    try {
+      await shell.trashItem(file);
+    } catch (e) {
+      return { ok: false, error: `Couldn't move it to the Recycle Bin: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    const sources = { ...(store.loadSettings().shipModSources ?? {}) };
+    delete sources[shipKey(dir, path.basename(file))];
+    store.saveSettings({ shipModSources: sources });
+    return forgetShipMod(dir, file);
+  });
+  ipcMain.handle('modhub:addShipMods', async (_e, portId: string) => {
+    const dir = await modPort(portId);
+    if (!dir) return null;
+    const r = await dialog.showOpenDialog({
+      title: `Add ${MOD_PORTS[dir.id].name} mod packs`,
+      defaultPath: app.getPath('downloads'),
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Mod packs', extensions: ['o2r', 'otr'] }],
+    });
+    if (r.canceled || !r.filePaths.length) return null;
+    return addShipMods(dir, r.filePaths);
+  });
+  ipcMain.handle('modhub:applyShipModList', async (_e, portId: string, files: string[]) => {
+    const dir = await modPort(portId);
+    if (!dir) return { ok: false, message: NO_PORT };
+    const r = applyShipModList(dir, (files ?? []).map(String));
+    lastEmulation = null;
+    if (!r.ok) return { ok: false, message: r.error ?? 'Failed' };
+    return {
+      ok: true,
+      message: `Modlist applied (${r.switched} pack${r.switched === 1 ? '' : 's'} switched, order set)${r.missing.length ? `; not installed: ${r.missing.join(', ')}` : ''}`,
+    };
+  });
+  ipcMain.handle('modhub:checkShipModUpdates', async (_e, portId: string) => {
+    const dir = await modPort(portId);
+    if (!dir) return { updates: [], checked: 0, error: NO_PORT };
+    try {
+      return await checkShipModUpdates(dir);
+    } catch (e) {
+      return { updates: [], checked: 0, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('modhub:updateShipMod', async (_e, portId: string, file: string) => {
+    const dir = await modPort(portId);
+    if (!dir) return { ok: false, message: NO_PORT };
+    try {
+      return await updateShipMod(dir, String(file));
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    } finally {
+      lastEmulation = null;
+    }
+  });
+
+  // GameBanana (Emulation tab): Mods only, SFW. Downloads only on the user's click.
+  ipcMain.handle('modhub:gbSearchGames', (_e, name: string) => searchGbGames(String(name)).catch(() => []));
+  ipcMain.handle('modhub:gbListMods', async (_e, q) => {
+    try {
+      return await listGbMods({ ...q, showMature: store.loadSettings().gbShowMature !== false });
+    } catch (e) {
+      return { mods: [], total: 0, complete: true, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('modhub:gbModDetails', (_e, ids: number[]) => gbModDetails((ids ?? []).map(Number).filter(Boolean)));
+  ipcMain.handle('modhub:gbOpen', (_e, url: string) => {
+    if (/^https:\/\/(www\.)?gamebanana\.com\//i.test(String(url))) void shell.openExternal(String(url));
+  });
+  ipcMain.handle(
+    'modhub:gbInstall',
+    async (_e, modId: number, gameId: number, fileIds?: number[]): Promise<import('../shared/types').GbInstallResult> => {
+      try {
+        const det = (await gbModDetails([Number(modId)]))[Number(modId)];
+        if (!det) return { ok: false, message: 'Couldn’t read the mod’s files from GameBanana.' };
+        if (det.nsfw && store.loadSettings().gbShowMature === false)
+          return { ok: false, message: 'GameBanana marks this mod mature, and Show mature mods is off in Settings.' };
+        const wanted = Array.isArray(fileIds) && fileIds.length ? new Set(fileIds.map(Number)) : null;
+        const files = wanted ? det.files.filter((f) => wanted.has(f.id) && f.avResult !== 'infected') : [pickFile(det.files)].filter((f) => f != null);
+        if (files.length === 0) return { ok: false, message: 'No downloadable file chosen.' };
+        const gbPort = GB_PORT_GAMES[Number(gameId)];
+        const ship = gbPort ? await modPort(gbPort) : undefined;
+        const notes: string[] = [];
+        const installed: string[] = [];
+        let lastSaved: string | undefined;
+        let anyOk = false;
+        for (const file of files) {
+          const saved = await downloadGbFile(file, Number(modId), path.join(dataDir(), 'downloads'));
+          lastSaved = saved;
+          const scan = await defenderScan(saved);
+          if (scan.status === 'threat') {
+            notes.push(`${file.name}: Microsoft Defender found a threat; not installed.`);
+            continue;
+          }
+          const checked = scan.status === 'clean' ? 'Defender: clean' : `Defender couldn't scan it; GameBanana's scan: ${file.avResult ?? 'unknown'}`;
+          if (!ship) {
+            anyOk = true;
+            notes.push(`${file.name} downloaded (${checked}).`);
+            continue;
+          }
+          const { packs, tempDir, error } = packsFromDownload(saved);
+          try {
+            if (packs.length === 0) {
+              notes.push(`${file.name}: ${error ?? 'no .o2r/.otr pack inside'}.`);
+              continue;
+            }
+            const r = addShipMods(ship, packs);
+            if (r.added > 0) anyOk = true;
+            installed.push(...packs.map((p) => path.basename(p)));
+            if (r.addedFiles.length) {
+              const sources = { ...(store.loadSettings().shipModSources ?? {}) };
+              for (const f of r.addedFiles)
+                sources[shipKey(ship, f)] = { modId: Number(modId), modName: det.name, fileId: file.id, fileName: file.name, fileAdded: file.added };
+              store.saveSettings({ shipModSources: sources });
+            }
+            notes.push(
+              `${file.name}: ${r.added} pack${r.added === 1 ? '' : 's'} installed${r.added ? ' (on, top of the list)' : ''}${r.skipped.length ? ` (skipped: ${r.skipped.join(', ')})` : ''} (${checked}).${r.note ? ` ${r.note}` : ''}`,
+            );
+          } finally {
+            if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+          }
+        }
+        lastEmulation = null;
+        if (!ship && lastSaved) shell.showItemInFolder(lastSaved);
+        return { ok: anyOk, message: notes.join(' '), file: lastSaved, installed };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  );
+
+  ipcMain.handle('modhub:emulationPlay', async (_e, romPath: string) => {
+    if (!lastEmulation) lastEmulation = await scanEmulationLibrary(emulationRoot(), app.getPath('userData'));
+    return playRom(lastEmulation, romPath);
+  });
+  ipcMain.handle('modhub:emulationLaunch', async (_e, emulatorId: string) => {
+    if (!lastEmulation) lastEmulation = await scanEmulationLibrary(emulationRoot(), app.getPath('userData'));
+    return launchEmulator(lastEmulation, emulatorId);
+  });
+  ipcMain.handle('modhub:pickEmulationRoot', async () => {
+    const r = await dialog.showOpenDialog({ title: 'Emulation library folder', defaultPath: emulationRoot(), properties: ['openDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    store.saveSettings({ emulationRoot: r.filePaths[0] });
+    return r.filePaths[0];
+  });
+
   ipcMain.handle('modhub:openPath', (_e, filePath: string) => {
     if (!filePath) return;
+    // Electron's own reveal: no shell, so names with spaces, &, ' or ( ) open fine.
+    let target = path.normalize(String(filePath));
+    while (!fs.existsSync(target) && path.dirname(target) !== target) target = path.dirname(target);
     try {
-      if (process.platform === 'win32') {
-        const normalized = path.normalize(filePath);
-        if (fs.existsSync(normalized) && fs.statSync(normalized).isFile()) {
-          spawn('explorer.exe', [`/select,${normalized}`], { shell: true, windowsHide: true });
-        } else {
-          const dir = fs.existsSync(normalized) ? normalized : path.dirname(normalized);
-          spawn('explorer.exe', [dir], { shell: true, windowsHide: true });
-        }
-        return;
-      }
-      shell.showItemInFolder(filePath);
+      if (fs.statSync(target).isFile()) shell.showItemInFolder(target);
+      else void shell.openPath(target);
     } catch {
-      shell.openPath(filePath);
+      /* nothing there to show */
     }
   });
 
   ipcMain.handle('modhub:workshopBrowse', async (_e, query: import('../shared/types').WorkshopBrowseQuery) => {
-    console.log('[Mod Hub] workshopBrowse', query);
+    console.log('[ModKeeper] workshopBrowse', query);
     return queryWorkshopBrowse(query);
   });
 
@@ -1486,6 +1752,9 @@ function registerIpc() {
   });
 
   ipcMain.handle('modhub:getFavoriteIds', () => [...store.loadFavorites()]);
+  ipcMain.handle('modhub:workshopItems', (_e, pairs: { appId: number; workshopId: string }[]) =>
+    workshopItemsByIds((pairs ?? []).slice(0, 500).map((p) => ({ appId: Number(p.appId), workshopId: String(p.workshopId) }))).catch(() => []),
+  );
 
   ipcMain.handle('modhub:getBrowseInjectionScript', () => {
     const r = ensureInjectionFileOnDisk();
@@ -1533,7 +1802,7 @@ function registerIpc() {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           injectErrors.push(`${label}: ${msg}`);
-          console.warn(`[Mod Hub] ${label} failed:`, err);
+          console.warn(`[ModKeeper] ${label} failed:`, err);
         }
       };
       await tryLoad(
@@ -1549,7 +1818,7 @@ function registerIpc() {
       await tryLoad(
         'eval inject',
         async () => {
-          console.log('[Mod Hub] Injecting via eval from', loaded.source);
+          console.log('[ModKeeper] Injecting via eval from', loaded.source);
           await executeInjectionScript(wc, loaded.script);
         },
         20000,
@@ -1571,7 +1840,7 @@ function registerIpc() {
       if (parsed) {
         await wc.executeJavaScript(buildEnhancerUpdateScript(parsed.browseHref, parsed.gameDomain), true);
       }
-      console.log(`[Mod Hub] Carousel enhancer active on ${pageUrl} (${path.basename(loaded.source)})`);
+      console.log(`[ModKeeper] Carousel enhancer active on ${pageUrl} (${path.basename(loaded.source)})`);
       return { ok: true, message: `Carousel enhancer active (${path.basename(loaded.source)}).` };
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
@@ -1621,5 +1890,350 @@ function registerIpc() {
   ipcMain.handle('modhub:openNexusLogin', () => {
     shell.openExternal('https://www.nexusmods.com/users/myaccount?tab=api+access');
     return { ok: true, message: 'Generate a personal API key for track/download integration.' };
+  });
+}
+
+// ---------------- Ship of Harkinian packs: GameBanana sources and updates ----------------
+
+/** Where a pack's GameBanana source is kept: Ship's under the file name (as before), other ports with their id. */
+const shipKey = (port: ModPort, file: string) => (port.id === 'soh' ? file.toLowerCase() : `${port.id}:${file.toLowerCase()}`);
+
+/** A pack's file name changed: follow it in modlists and in the GameBanana sources. */
+function renameShipRefs(port: ModPort, oldFile: string, newFile: string) {
+  const s = store.loadSettings();
+  const sources = { ...(s.shipModSources ?? {}) };
+  if (sources[shipKey(port, oldFile)]) {
+    sources[shipKey(port, newFile)] = sources[shipKey(port, oldFile)];
+    delete sources[shipKey(port, oldFile)];
+  }
+  const lists = (s.shipModLists ?? []).map((l) =>
+    (l.game ?? 'soh') === port.id ? { ...l, files: l.files.map((f) => (f.toLowerCase() === oldFile.toLowerCase() ? newFile : f)) } : l,
+  );
+  store.saveSettings({ shipModSources: sources, shipModLists: lists });
+}
+
+/** Packs installed before sources were recorded: find them in ModKeeper's GameBanana downloads. */
+function shipSourcesFromDownloads(port: ModPort, files: string[]): Record<string, { modId: number; fileName: string }> {
+  const found: Record<string, { modId: number; fileName: string }> = {};
+  const root = path.join(dataDir(), 'downloads', 'gamebanana');
+  if (!files.length || !fs.existsSync(root)) return found;
+  for (const idDir of fs.readdirSync(root)) {
+    const modId = Number(idDir);
+    if (!modId) continue;
+    for (const f of fs.readdirSync(path.join(root, idDir))) {
+      if (f.endsWith('.part')) continue;
+      const inside = /\.(o2r|otr)$/i.test(f) ? [f] : listPathsWith7z(path.join(root, idDir, f)).map((l) => l.toLowerCase());
+      for (const file of files) {
+        const k = shipKey(port, file);
+        const n = file.toLowerCase();
+        if (found[k]) continue;
+        if (inside.some((l) => l.toLowerCase() === n || l.endsWith(` ${n}`) || l.endsWith(`\\${n}`) || l.endsWith(`/${n}`))) found[k] = { modId, fileName: f };
+      }
+    }
+  }
+  return found;
+}
+
+async function checkShipModUpdates(dir: ModPort): Promise<{ updates: import('../shared/types').ShipModUpdate[]; checked: number }> {
+  const mods = listShipMods(dir);
+  const sources = { ...(store.loadSettings().shipModSources ?? {}) };
+  const found = shipSourcesFromDownloads(dir, mods.filter((m) => !sources[shipKey(dir, m.file)]).map((m) => m.file));
+  const ids = [...new Set([...mods.map((m) => sources[shipKey(dir, m.file)]?.modId), ...Object.values(found).map((f) => f.modId)].filter((x): x is number => !!x))];
+  const details = await gbModDetails(ids, true);
+  let changed = false;
+  for (const [k, f] of Object.entries(found)) {
+    const det = details[f.modId];
+    if (!det) continue;
+    const gbFile = det.files.find((x) => x.name.toLowerCase() === f.fileName.toLowerCase());
+    sources[k] = { modId: f.modId, modName: det.name, fileId: gbFile?.id, fileName: f.fileName, fileAdded: gbFile?.added };
+    changed = true;
+  }
+  const updates: import('../shared/types').ShipModUpdate[] = [];
+  const inUse = new Set(mods.map((m) => sources[shipKey(dir, m.file)]?.fileId).filter((x): x is number => !!x));
+  let checked = 0;
+  for (const m of mods) {
+    const src = sources[shipKey(dir, m.file)];
+    const det = src && details[src.modId];
+    if (!src || !det) continue;
+    checked++;
+    if (!src.modName && det.name) {
+      src.modName = det.name;
+      changed = true;
+    }
+    const nf = newerFile(det.files, src, inUse);
+    if (nf) updates.push({ file: m.file, modId: src.modId, modName: src.modName, newFile: nf.name, newFileAdded: nf.added });
+  }
+  if (changed) store.saveSettings({ shipModSources: sources });
+  return { updates, checked };
+}
+
+async function updateShipMod(dir: ModPort, file: string): Promise<{ ok: boolean; message: string }> {
+  const mod = listShipMods(dir).find((m) => shipKey(dir, m.file) === shipKey(dir, file));
+  const src = store.loadSettings().shipModSources?.[shipKey(dir, file)];
+  if (!mod || !src) return { ok: false, message: 'ModKeeper doesn’t know where this pack came from.' };
+  if (shipIsRunning(dir)) return { ok: false, message: `Close ${MOD_PORTS[dir.id].name} first.` };
+  const det = (await gbModDetails([src.modId], true))[src.modId];
+  if (!det) return { ok: false, message: 'Couldn’t read the mod from GameBanana.' };
+  if (det.nsfw && store.loadSettings().gbShowMature === false)
+    return { ok: false, message: 'GameBanana now marks this mod mature, and Show mature mods is off in Settings.' };
+  const sources0 = store.loadSettings().shipModSources ?? {};
+  const inUse = new Set(Object.entries(sources0).filter(([k]) => k !== shipKey(dir, file)).map(([, v]) => v.fileId).filter((x): x is number => !!x));
+  const nf = newerFile(det.files, src, inUse);
+  if (!nf) return { ok: true, message: `${file} is up to date.` };
+  const saved = await downloadGbFile(nf, src.modId, path.join(dataDir(), 'downloads'));
+  const scan = await defenderScan(saved);
+  if (scan.status === 'threat') return { ok: false, message: `${nf.name}: Microsoft Defender found a threat; not installed.` };
+  const checked = scan.status === 'clean' ? 'Defender: clean' : `Defender couldn't scan it; GameBanana's scan: ${nf.avResult ?? 'unknown'}`;
+  const { packs, tempDir, error } = packsFromDownload(saved);
+  try {
+    const pack = bestMatch(packs, file, (p) => path.basename(p));
+    if (!pack) return { ok: false, message: `${nf.name}: ${error ?? (packs.length ? 'couldn’t tell which pack replaces this one' : 'no .o2r/.otr pack inside')}.` };
+    const backup = path.join(dataDir(), 'backups', 'ship-packs', new Date().toISOString().replace(/[:.]/g, '-'));
+    const r = replaceShipMod(dir, mod.path, pack, backup);
+    if (!r.ok || !r.file) return { ok: false, message: r.error ?? 'Failed' };
+    if (r.file !== mod.file) renameShipRefs(dir, mod.file, r.file);
+    const sources = { ...(store.loadSettings().shipModSources ?? {}) };
+    sources[shipKey(dir, r.file)] = { ...src, modName: det.name ?? src.modName, fileId: nf.id, fileName: nf.name, fileAdded: nf.added };
+    store.saveSettings({ shipModSources: sources });
+    return { ok: true, message: `Updated ${mod.file}${r.file !== mod.file ? ` → ${r.file}` : ''} (${checked}). The old pack is in ModKeeper's backups.` };
+  } finally {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+// ---------------- Minecraft tab ----------------
+
+const MC_KINDS = ['mods', 'resourcepacks', 'shaderpacks', 'worlds', 'screenshots'] as const;
+type McKindT = (typeof MC_KINDS)[number];
+const asKind = (k: unknown): McKindT | undefined => MC_KINDS.find((x) => x === k);
+
+function registerMinecraftIpc() {
+  const inst = (id: unknown) => mcInstanceById(String(id));
+  const NO_INST = 'That Minecraft instance isn’t there any more.';
+  /** Changes wait until the game is closed (Windows locks the jars; Minecraft rewrites options.txt on exit). */
+  const closedFirst = (i: import('../shared/types').McInstance) =>
+    mcInstanceRunning(i.gameDir) ? `Close Minecraft (“${i.name}”) first.` : undefined;
+
+  ipcMain.handle('modhub:mcInstances', () => ({
+    instances: findMcInstances(),
+    launchers: { prism: launcherInstalled('prism'), curseforge: launcherInstalled('curseforge'), modrinth: launcherInstalled('modrinth'), vanilla: launcherInstalled('vanilla') },
+  }));
+  ipcMain.handle('modhub:mcContent', (_e, id: string, kind: string) => {
+    const i = inst(id);
+    const k = asKind(kind);
+    return i && k ? listMcContent(i, k) : [];
+  });
+  /** A small thumbnail for the gallery, or the full picture (JPEG, so big PNGs stay quick) for the viewer. */
+  ipcMain.handle('modhub:mcScreenshot', (_e, id: string, file: string, full?: boolean) => {
+    const i = inst(id);
+    const f = i && screenshotPath(i, String(file));
+    if (!f) return undefined;
+    const img = nativeImage.createFromPath(f);
+    if (img.isEmpty()) return undefined;
+    const out = full ? img : img.resize({ width: 480, quality: 'good' });
+    return `data:image/jpeg;base64,${out.toJPEG(full ? 90 : 75).toString('base64')}`;
+  });
+  ipcMain.handle('modhub:mcSetEnabled', (_e, id: string, kind: string, file: string, enabled: boolean) => {
+    const i = inst(id);
+    const k = asKind(kind);
+    if (!i || !k) return { ok: false, error: NO_INST };
+    const busy = closedFirst(i);
+    if (busy) return { ok: false, error: busy };
+    try {
+      if (k === 'mods') return setModEnabled(i, String(file), Boolean(enabled));
+      if (k === 'resourcepacks') return setResourcePackEnabled(i, String(file), Boolean(enabled));
+      if (k === 'shaderpacks') return setActiveShader(i, enabled ? String(file) : null);
+      return { ok: false, error: 'Nothing to switch' };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('modhub:mcMovePack', (_e, id: string, file: string, delta: number) => {
+    const i = inst(id);
+    if (!i) return { ok: false, error: NO_INST };
+    const busy = closedFirst(i);
+    return busy ? { ok: false, error: busy } : moveResourcePack(i, String(file), Number(delta));
+  });
+  ipcMain.handle('modhub:mcDelete', async (_e, id: string, kind: string, file: string) => {
+    const i = inst(id);
+    const k = asKind(kind);
+    if (!i || !k) return { ok: false, error: NO_INST };
+    const busy = closedFirst(i);
+    if (busy) return { ok: false, error: busy };
+    let target = itemPath(i, k, String(file));
+    if (target && k === 'mods' && !fs.existsSync(target) && fs.existsSync(`${target}.disabled`)) target = `${target}.disabled`;
+    if (!target || !fs.existsSync(target)) return { ok: false, error: 'Not found' };
+    try {
+      await shell.trashItem(target);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: `Couldn't move it to the Recycle Bin: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  });
+  ipcMain.handle('modhub:mcBackupWorld', (_e, id: string, file: string) => {
+    const i = inst(id);
+    if (!i) return { ok: false, error: NO_INST };
+    const busy = closedFirst(i);
+    if (busy) return { ok: false, error: busy };
+    try {
+      const r = backupWorld(i, String(file));
+      if (r.path) shell.showItemInFolder(r.path);
+      return r;
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('modhub:mcOpenFolder', (_e, id: string, kind?: string, file?: string) => {
+    const i = inst(id);
+    if (!i) return;
+    const k = asKind(kind);
+    const f = k && file ? itemPath(i, k, String(file)) : undefined;
+    if (f && fs.existsSync(f)) shell.showItemInFolder(f);
+    else {
+      const dir = k ? kindDir(i, k) : i.gameDir;
+      fs.mkdirSync(dir, { recursive: true });
+      void shell.openPath(dir);
+    }
+  });
+  ipcMain.handle('modhub:mcOpenLauncher', (_e, id: string) => {
+    const i = inst(id);
+    return i ? openMcLauncher(i) : { ok: false, message: NO_INST };
+  });
+  ipcMain.handle('modhub:mcPlay', (_e, id: string) => {
+    const i = inst(id);
+    return i ? launchMcInstance(i) : { ok: false, message: NO_INST };
+  });
+  ipcMain.handle('modhub:mcApplyModList', (_e, id: string, files: string[]) => {
+    const i = inst(id);
+    if (!i) return { ok: false, message: NO_INST };
+    const busy = closedFirst(i);
+    if (busy) return { ok: false, message: busy };
+    const r = applyMcModList(i, (files ?? []).map(String));
+    if (!r.ok) return { ok: false, message: r.error ?? 'Failed' };
+    return { ok: true, message: `Modlist applied (${r.switched} mod${r.switched === 1 ? '' : 's'} switched)${r.missing.length ? `; not installed: ${r.missing.join(', ')}` : ''}` };
+  });
+  ipcMain.handle('modhub:mcSearch', async (_e, q: { site: 'modrinth' | 'curseforge'; kind: string; instance: string; query?: string; sort: import('../shared/types').McBrowseSort; page: number; perPage: number; anyVersion?: boolean }) => {
+    const i = inst(q?.instance);
+    const k = asKind(q?.kind);
+    if (!i || !k) return { projects: [], total: 0, error: NO_INST };
+    try {
+      return await searchMc({ ...q, kind: k, inst: i, page: Math.max(1, Number(q.page) || 1), perPage: Math.min(50, Number(q.perPage) || 20), cfKey: store.loadSettings().curseforgeApiKey });
+    } catch (e) {
+      return { projects: [], total: 0, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('modhub:mcInstall', async (_e, q: { site: 'modrinth' | 'curseforge'; kind: string; instance: string; projectId: string; title?: string }) => {
+    const i = inst(q?.instance);
+    const k = asKind(q?.kind);
+    if (!i || !k) return { ok: false, message: NO_INST };
+    const busy = closedFirst(i);
+    if (busy) return { ok: false, message: busy };
+    const r = await installMc({ site: q.site, kind: k, inst: i, projectId: String(q.projectId), title: q.title, cfKey: store.loadSettings().curseforgeApiKey });
+    if (r.installed.length) {
+      const sources = { ...(store.loadSettings().mcSources ?? {}) };
+      for (const x of r.installed) sources[`${i.id}|${x.file.toLowerCase()}`] = x.source;
+      store.saveSettings({ mcSources: sources });
+    }
+    return { ok: r.ok, message: r.message };
+  });
+  ipcMain.handle('modhub:mcCheckUpdates', async (_e, id: string, kind: string) => {
+    const i = inst(id);
+    const k = asKind(kind);
+    if (!i || !k) return { updates: [], error: NO_INST };
+    try {
+      const s = store.loadSettings();
+      return { updates: await checkMcUpdates(i, k, s.mcSources ?? {}, s.curseforgeApiKey) };
+    } catch (e) {
+      return { updates: [], error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('modhub:mcUpdate', async (_e, id: string, kind: string, file: string) => {
+    const i = inst(id);
+    const k = asKind(kind);
+    if (!i || !k) return { ok: false, message: NO_INST };
+    const busy = closedFirst(i);
+    if (busy) return { ok: false, message: busy };
+    try {
+      const s = store.loadSettings();
+      const r = await updateMcItem(i, k, String(file), s.mcSources ?? {}, s.curseforgeApiKey);
+      if (r.ok && r.newFile && r.source) {
+        const sources = { ...(s.mcSources ?? {}) };
+        delete sources[`${i.id}|${String(file).toLowerCase()}`];
+        sources[`${i.id}|${r.newFile.toLowerCase()}`] = r.source;
+        const lists = (s.mcModLists ?? []).map((l) =>
+          l.instance === i.id ? { ...l, files: l.files.map((f) => (f.toLowerCase() === String(file).toLowerCase() ? r.newFile! : f)) } : l,
+        );
+        store.saveSettings({ mcSources: sources, mcModLists: lists });
+      }
+      return { ok: r.ok, message: r.message };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  // links the Minecraft tab shows: Modrinth/CurseForge pages, the CurseForge key console, and the launchers' download pages
+  ipcMain.handle('modhub:mcOpenPage', (_e, url: string) => {
+    const u = String(url);
+    if (/^https:\/\/([a-z0-9-]+\.)?(modrinth\.com|curseforge\.com|prismlauncher\.org|minecraft\.net)(\/|$)/i.test(u)) void shell.openExternal(u);
+  });
+  ipcMain.handle('modhub:mcRenameWorld', (_e, id: string, file: string, name: string, renameFolder: boolean) => {
+    const i = inst(id);
+    if (!i) return { ok: false, error: NO_INST };
+    const busy = closedFirst(i);
+    if (busy) return { ok: false, error: busy };
+    try {
+      return renameWorld(i, String(file), String(name), Boolean(renameFolder));
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  ipcMain.handle('modhub:mcWorldDetails', (_e, id: string, file: string) => {
+    const i = inst(id);
+    const dir = i && itemPath(i, 'worlds', String(file));
+    if (!dir || !fs.existsSync(path.join(dir, 'level.dat'))) return null;
+    try {
+      return worldDetails(dir);
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.handle('modhub:mcWorldMap', (_e, id: string, file: string, q: { x: number; z: number; radius: number; dimension: 'overworld' | 'nether' | 'end' }) => {
+    const i = inst(id);
+    const dir = i && itemPath(i, 'worlds', String(file));
+    if (!dir) return { chunks: 0, error: NO_INST };
+    const radius = Math.max(32, Math.min(1024, Math.round(Number(q?.radius) || 256)));
+    const dim = q?.dimension === 'nether' || q?.dimension === 'end' ? q.dimension : 'overworld';
+    try {
+      const m = renderWorldMap(dir, Number(q?.x) || 0, Number(q?.z) || 0, radius, dim);
+      // nativeImage wants BGRA
+      for (let p = 0; p < m.rgba.length; p += 4) {
+        const r = m.rgba[p];
+        m.rgba[p] = m.rgba[p + 2];
+        m.rgba[p + 2] = r;
+      }
+      const img = nativeImage.createFromBitmap(m.rgba, { width: m.width, height: m.height });
+      return { image: `data:image/png;base64,${img.toPNG().toString('base64')}`, chunks: m.chunks };
+    } catch (e) {
+      return { chunks: 0, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  let versionDates: Record<string, string> | undefined;
+  ipcMain.handle('modhub:mcVersionDates', async () => {
+    if (versionDates) return versionDates;
+    type Manifest = { versions?: { id: string; releaseTime: string }[] };
+    let m: Manifest | undefined;
+    try {
+      const res = await fetch('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json');
+      if (res.ok) m = (await res.json()) as Manifest;
+    } catch {
+      /* offline: the launcher's own copy below */
+    }
+    if (!m)
+      try {
+        m = JSON.parse(fs.readFileSync(path.join(app.getPath('appData'), '.minecraft', 'versions', 'version_manifest_v2.json'), 'utf8')) as Manifest;
+      } catch {
+        m = {};
+      }
+    versionDates = Object.fromEntries((m.versions ?? []).map((v) => [v.id, v.releaseTime]));
+    return versionDates;
   });
 }

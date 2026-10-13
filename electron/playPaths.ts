@@ -13,7 +13,7 @@ import { discoverSteamLibraries } from './steamDiscovery';
 export { findMo2Instances };
 
 /**
- * "Play": the ways each game can be started, best first. Mod Hub doesn't deploy anything itself (yet); it starts
+ * "Play": the ways each game can be started, best first. ModKeeper doesn't deploy anything itself (yet); it starts
  * the game through whatever owns the mods: MO2 (virtual file system + profile), REPENTOGON's launcher, SKSE for
  * Vortex-deployed Skyrim, or plain Steam (which reads ModsConfig.xml / mods\default.txt / disable.it as-is).
  */
@@ -120,7 +120,7 @@ export function playOptions(gameId: string, remembered: { repentogonLauncher?: s
       command: `steam://rungameid/${appId}`,
       args: [],
       recommended: !out.some((o) => o.recommended),
-      note: 'Plain Steam launch. The game reads its own mod list (Mod Hub writes it), Vortex deployments stay in place.',
+      note: 'Plain Steam launch. The game reads its own mod list (ModKeeper writes it), Vortex deployments stay in place.',
     });
   }
   return out;

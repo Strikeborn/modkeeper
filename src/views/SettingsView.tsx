@@ -12,6 +12,7 @@ export function SettingsView({ catalog, onSaved }: Props) {
   const [settings, setSettings] = useState<HubSettings | null>(null);
   const [nexusKey, setNexusKey] = useState('');
   const [vtKey, setVtKey] = useState('');
+  const [cfKey, setCfKey] = useState('');
   const [sweep, setSweep] = useState<DefenderSweep | null>(null);
   useEffect(() => {
     void window.modHub?.getLastSweep?.().then(setSweep);
@@ -27,6 +28,8 @@ export function SettingsView({ catalog, onSaved }: Props) {
   );
   const [message, setMessage] = useState('');
 
+  const [recordingHotkey, setRecordingHotkey] = useState(false);
+
   async function saveBg(partial: Partial<HubSettings>) {
     if (!window.modHub) return;
     setSettings(await window.modHub.saveSettings(partial));
@@ -38,6 +41,7 @@ export function SettingsView({ catalog, onSaved }: Props) {
       setSettings(s);
       setNexusKey(s.nexusApiKey ?? '');
       setVtKey(s.virusTotalApiKey ?? '');
+      setCfKey(s.curseforgeApiKey ?? '');
     });
   }, []);
 
@@ -91,6 +95,42 @@ export function SettingsView({ catalog, onSaved }: Props) {
             <option value="all">All games</option>
             <option value="last">Last chosen (remember per tab)</option>
           </select>
+        </label>
+
+        <h2>Window</h2>
+        <label className="checkbox-inline">
+          <input
+            type="checkbox"
+            checked={settings.startFullscreen !== false}
+            onChange={(e) => {
+              void saveBg({ startFullscreen: e.target.checked });
+              void window.modHub?.setFullScreen(e.target.checked);
+            }}
+          />
+          Fullscreen (also applies at start)
+        </label>
+        <label>
+          Fullscreen hotkey (click, then press the keys)
+          <input
+            type="text"
+            readOnly
+            className="hotkey-input"
+            value={recordingHotkey ? 'Press a key combination…' : settings.fullscreenHotkey || 'F11'}
+            onFocus={() => setRecordingHotkey(true)}
+            onBlur={() => setRecordingHotkey(false)}
+            onKeyDown={(e) => {
+              e.preventDefault();
+              if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+              if (e.key === 'Escape') {
+                (e.target as HTMLInputElement).blur();
+                return;
+              }
+              const key = e.key === ' ' ? 'Space' : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+              const combo = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Meta', key].filter(Boolean).join('+');
+              void saveBg({ fullscreenHotkey: combo });
+              (e.target as HTMLInputElement).blur();
+            }}
+          />
         </label>
 
         <h2>Background checks</h2>
@@ -156,6 +196,13 @@ export function SettingsView({ catalog, onSaved }: Props) {
             onChange={(e) => void saveBg({ isaacLuaDebugGuard: e.target.checked })}
           />
           Keep Isaac LuaDebug off (REPENTOGON setting; mods that need it get flagged)
+        </label>
+        <label>
+          Show mature mods on GameBanana
+          <select value={settings.gbShowMature === false ? 'off' : 'on'} onChange={(e) => void saveBg({ gbShowMature: e.target.value === 'on' })}>
+            <option value="on">On (marked 18+)</option>
+            <option value="off">Off</option>
+          </select>
         </label>
         <label>
           VirusTotal API key (free at virustotal.com → profile → API key; 4 lookups/min)
@@ -259,6 +306,17 @@ export function SettingsView({ catalog, onSaved }: Props) {
         <button type="button" className="btn" onClick={() => window.modHubAuth?.openSteamLogin()}>
           Open Steam login (Workshop)
         </button>
+        <label>
+          CurseForge API key (Minecraft tab: browse and install from CurseForge; Modrinth needs no key)
+          <input
+            type="password"
+            value={cfKey}
+            placeholder="from console.curseforge.com → API keys"
+            autoComplete="off"
+            onChange={(e) => setCfKey(e.target.value)}
+            onBlur={() => void saveBg({ curseforgeApiKey: cfKey.trim() || undefined })}
+          />
+        </label>
 
         <h2>Scan paths</h2>
         <button type="button" className="btn" onClick={addScanFolders}>

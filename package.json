@@ -1,5 +1,5 @@
 {
-  "name": "mod-hub",
+  "name": "modkeeper",
   "private": true,
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
@@ -42,7 +42,7 @@
   "author": "Strikeborn",
   "build": {
     "appId": "io.github.strikeborn.modhub",
-    "productName": "Mod Hub",
+    "productName": "ModKeeper",
     "directories": {
       "output": "release"
     },
@@ -67,7 +67,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "Mod-Hub-Setup-${version}.${ext}"
+      "artifactName": "ModKeeper-Setup-${version}.${ext}"
     }
   }
 }

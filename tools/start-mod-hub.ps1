@@ -1,6 +1,6 @@
-# Start Mod Hub. Each run writes a UTF-8 log to logs/ (never overwritten).
+# Start ModKeeper. Each run writes a UTF-8 log to logs/ (never overwritten).
 # Default: run the built app (fast; rebuilds first only if source files changed since the last build).
-# -Dev: Vite dev server + hot reload + DevTools (for working on Mod Hub itself).
+# -Dev: Vite dev server + hot reload + DevTools (for working on ModKeeper itself).
 # Keep this file ASCII-only: Windows PowerShell 5 reads BOM-less scripts as ANSI.
 param([switch]$Dev)
 $ErrorActionPreference = 'Stop'
@@ -8,11 +8,11 @@ $ErrorActionPreference = 'Stop'
 # Show npm/vite/electron output as UTF-8 so symbols render instead of mojibake.
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
-$host.UI.RawUI.WindowTitle = 'Mod Hub - console'
+$host.UI.RawUI.WindowTitle = 'ModKeeper - console'
 
 $modHubDir = Split-Path $PSScriptRoot -Parent
 if (-not (Test-Path (Join-Path $modHubDir 'package.json'))) {
-	throw "Mod Hub not found: $modHubDir"
+	throw "ModKeeper not found: $modHubDir"
 }
 
 $logDir = Join-Path $modHubDir 'logs'
@@ -31,7 +31,7 @@ function Write-Line([string]$text) {
 	$color = 'Gray'
 	if ($clean -match '(?i)\b(error|failed|exception)\b') { $color = 'Red' }
 	elseif ($clean -match '(?i)\bwarn') { $color = 'Yellow' }
-	elseif ($clean -match '^\[Mod Hub') { $color = 'Cyan' }
+	elseif ($clean -match '^\[ModKeeper') { $color = 'Cyan' }
 	elseif ($clean -match '(?i)^\s*(built in|ready in)|\bready\b') { $color = 'Green' }
 	elseif ($clean -match '^\s*$') { return }
 	Write-Host "$time  " -NoNewline -ForegroundColor DarkGray
@@ -46,11 +46,11 @@ Write-Host "  Log       $logPath"
 Write-Host "  Catalog   $data\catalog.json"
 Write-Host "  Settings  $data\settings.json"
 Write-Host "  Vault     $data\vault  (hard links to Vortex downloads)"
-Write-Host '  Use the window titled "Mod Hub" - not localhost:5173 in a browser.' -ForegroundColor DarkGray
-Write-Host '  Close this window to quit Mod Hub.' -ForegroundColor DarkGray
+Write-Host '  Use the window titled "ModKeeper" - not localhost:5173 in a browser.' -ForegroundColor DarkGray
+Write-Host '  Close this window to quit ModKeeper.' -ForegroundColor DarkGray
 Write-Host '  -------------------------------------------------------------' -ForegroundColor DarkGray
 Write-Host ''
-"=== Mod Hub run $stamp ===" | Out-File -FilePath $logPath -Encoding utf8
+"=== ModKeeper run $stamp ===" | Out-File -FilePath $logPath -Encoding utf8
 
 Set-Location $modHubDir
 $ErrorActionPreference = 'Continue'
@@ -63,7 +63,7 @@ if (-not (Test-Path (Join-Path $modHubDir 'node_modules'))) {
 if ($Dev) {
 	Write-Line 'Dev mode: Vite dev server + hot reload.'
 	npm run dev 2>&1 | ForEach-Object { Write-Line "$_" }
-	Write-Line 'Mod Hub exited.'
+	Write-Line 'ModKeeper exited.'
 	return
 }
 
@@ -86,11 +86,11 @@ if ($oldestBuild -lt $newest) {
 	if ($LASTEXITCODE -ne 0) {
 		Write-Line 'Build failed - starting dev mode instead.'
 		npm run dev 2>&1 | ForEach-Object { Write-Line "$_" }
-		Write-Line 'Mod Hub exited.'
+		Write-Line 'ModKeeper exited.'
 		return
 	}
 }
 
 $electron = Join-Path $modHubDir 'node_modules\electron\dist\electron.exe'
 & $electron . --no-sandbox 2>&1 | ForEach-Object { Write-Line "$_" }
-Write-Line 'Mod Hub exited.'
+Write-Line 'ModKeeper exited.'

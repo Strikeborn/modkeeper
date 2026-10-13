@@ -10,7 +10,7 @@ import { discoverSteamLibraries } from './steamDiscovery';
 
 /**
  * "Scan all mod folders": one recursive Defender scan per place mods live (Workshop folders, Vortex staging and
- * downloads, MO2, game mod folders, Mod Hub's vault) instead of one scan per mod. Archives are scanned inside.
+ * downloads, MO2, game mod folders, ModKeeper's vault) instead of one scan per mod. Archives are scanned inside.
  * Threats Defender reports are mapped back to the mod they belong to.
  */
 
@@ -34,8 +34,8 @@ export function modRoots(mods: ModRecord[], userData: string): { label: string; 
   add('Project Zomboid mods', path.join(os.homedir(), 'Zomboid', 'mods'));
   add('Terraria resource packs', path.join(os.homedir(), 'Documents', 'My Games', 'Terraria', 'ResourcePacks'));
   add("Baldur's Gate 3 Mods", path.join(process.env.LOCALAPPDATA ?? '', 'Larian Studios', "Baldur's Gate 3", 'Mods'));
-  add('Mod Hub vault', path.join(userData, 'vault'));
-  add('Mod Hub kept mods', path.join(userData, 'kept-mods'));
+  add('ModKeeper archive vault', path.join(userData, 'vault'));
+  add('ModKeeper kept mods', path.join(userData, 'kept-mods'));
   const lower = (p: string) => p.toLowerCase().replace(/[\\/]+$/, '');
   const unique = out.filter((r, i) => out.findIndex((x) => lower(x.dir) === lower(r.dir)) === i);
   return unique.filter((r) => !unique.some((o) => o !== r && lower(r.dir).startsWith(`${lower(o.dir)}\\`)));

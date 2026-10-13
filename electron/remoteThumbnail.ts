@@ -81,7 +81,7 @@ async function load(url: string): Promise<string | null> {
     if (result.dataUrl) {
       cache.set(url, { at: Date.now(), ttl: OK_TTL_MS, dataUrl: result.dataUrl });
     } else {
-      console.warn(`[Mod Hub] thumbnail fetch failed (${result.reason}): ${url}`);
+      console.warn(`[ModKeeper] thumbnail fetch failed (${result.reason}): ${url}`);
       cache.set(url, {
         at: Date.now(),
         ttl: result.permanent ? PERMANENT_FAIL_TTL_MS : TRANSIENT_FAIL_TTL_MS,

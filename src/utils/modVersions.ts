@@ -47,3 +47,27 @@ export function gameVersionsFor(m: ModRecord): GameVersionInfo | null {
     guessed: true,
   };
 }
+
+/**
+ * Newest numeric version tag that a real share of a game's mods carry (≥ 3 mods and ≥ 10% of tagged mods), so one
+ * mis-tagged mod ("1.7" before 1.7 exists) doesn't make it the target. Null when there is none.
+ */
+export function latestVersionTag(mods: ModRecord[]): string | null {
+  const counts = new Map<string, number>();
+  let tagged = 0;
+  for (const m of mods) {
+    const nums = (m.gameVersionTags ?? []).filter((t) => Number.isFinite(Number(t)));
+    if (nums.length) tagged += 1;
+    for (const t of new Set(nums)) counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  const need = Math.max(3, Math.ceil(tagged * 0.1));
+  let best: string | null = null;
+  for (const [t, n] of counts) if (n >= need && (best == null || Number(t) > Number(best))) best = t;
+  return best;
+}
+
+/** True when the mod lists version tags but not `version` (it hasn't been updated for it). */
+export function missesVersion(m: ModRecord, version: string): boolean {
+  const tags = m.gameVersionTags ?? [];
+  return tags.length > 0 && numericVersions(tags).length > 0 && !tags.includes(version);
+}

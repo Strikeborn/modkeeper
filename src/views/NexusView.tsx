@@ -115,7 +115,7 @@ export function NexusView({ catalog, viewMode, trackedNexus, onTrackedNexusChang
       {nexusPanel === 'native' && (
         <>
           <p className="message message-compact">
-            Future native carousel (no DOM injection). API key handles track/nxm from Mod Hub.
+            Future native carousel (no DOM injection). API key handles track/nxm from ModKeeper.
           </p>
           <div className="empty-state">Native Nexus UI not wired yet.</div>
         </>
