@@ -12,17 +12,19 @@ jobs:
   installer:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: npm run dist
+      # softprops/action-gh-release below attaches the files; electron-builder must not try to publish on its own
+      # (on a tag in CI it does by default, and fails without a token)
+      - run: npm run dist -- --publish never
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/Mod-Hub-Setup-*.exe
-            release/Mod-Hub-Setup-*.exe.blockmap
+            release/ModKeeper-Setup-*.exe
+            release/ModKeeper-Setup-*.exe.blockmap
           generate_release_notes: true
